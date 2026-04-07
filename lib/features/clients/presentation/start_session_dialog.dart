@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-enum LockerEntryMode { manual, magnetic }
+import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/liquid_glass.dart';
 
 class StartSessionDialogResult {
-  const StartSessionDialogResult({required this.mode, this.lockerNumber});
+  const StartSessionDialogResult({required this.lockerNumber});
 
-  final LockerEntryMode mode;
-  final String? lockerNumber;
+  final String lockerNumber;
 }
 
 Future<StartSessionDialogResult?> showStartSessionDialog(
@@ -30,7 +30,6 @@ class _StartSessionDialog extends StatefulWidget {
 
 class _StartSessionDialogState extends State<_StartSessionDialog> {
   final _lockerController = TextEditingController();
-  LockerEntryMode _mode = LockerEntryMode.manual;
 
   @override
   void dispose() {
@@ -40,82 +39,80 @@ class _StartSessionDialogState extends State<_StartSessionDialog> {
 
   void _confirm() {
     final lockerValue = _lockerController.text.trim();
-    if (_mode == LockerEntryMode.manual && lockerValue.isEmpty) {
+    if (lockerValue.isEmpty) {
       return;
     }
 
-    Navigator.of(context).pop(
-      StartSessionDialogResult(
-        mode: _mode,
-        lockerNumber: _mode == LockerEntryMode.manual ? lockerValue : null,
-      ),
-    );
+    Navigator.of(
+      context,
+    ).pop(StartSessionDialogResult(lockerNumber: lockerValue));
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final canConfirm =
-        _mode == LockerEntryMode.magnetic ||
-        _lockerController.text.trim().isNotEmpty;
 
-    return AlertDialog(
-      title: const Text('Give key'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(widget.clientName, style: theme.textTheme.bodyLarge),
-          const SizedBox(height: 16),
-          SegmentedButton<LockerEntryMode>(
-            segments: const [
-              ButtonSegment(
-                value: LockerEntryMode.manual,
-                label: Text('Manual'),
-                icon: Icon(Icons.pin_outlined),
-              ),
-              ButtonSegment(
-                value: LockerEntryMode.magnetic,
-                label: Text('Magnetic'),
-                icon: Icon(Icons.nfc_rounded),
-              ),
-            ],
-            selected: {_mode},
-            onSelectionChanged: (selection) {
-              setState(() => _mode = selection.first);
-            },
-          ),
-          const SizedBox(height: 16),
-          if (_mode == LockerEntryMode.manual)
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+      child: AppLiquidGlass(
+        padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+        borderRadius: BorderRadius.circular(28),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xF0283A4D), Color(0xDE17212C)],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.clientName,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontSize: 26,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Give key',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close_rounded),
+                  color: AppColors.mutedInk,
+                  splashRadius: 18,
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             TextField(
               controller: _lockerController,
               autofocus: true,
               keyboardType: TextInputType.number,
               textInputAction: TextInputAction.done,
-              onChanged: (_) => setState(() {}),
               onSubmitted: (_) => _confirm(),
               decoration: const InputDecoration(
-                labelText: 'Locker number',
-                hintText: 'Enter locker code',
+                labelText: 'Key number',
+                hintText: 'Enter key number',
               ),
-            )
-          else
-            Text(
-              'Use this mode when you are working without a manual locker code. The production backend accepts a null locker number in this path.',
-              style: theme.textTheme.bodyMedium,
             ),
-        ],
+          ],
+        ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: canConfirm ? _confirm : null,
-          child: const Text('Start session'),
-        ),
-      ],
     );
   }
 }
