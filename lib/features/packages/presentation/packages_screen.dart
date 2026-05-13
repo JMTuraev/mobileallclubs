@@ -6,6 +6,7 @@ import '../../../core/config/developer_tools.dart';
 import '../../../core/routing/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_control_widgets.dart';
+import '../../../core/widgets/app_data_chip.dart';
 import '../../../core/widgets/app_date_range_filter_sheet.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
 import '../../../models/auth_bootstrap_models.dart';
@@ -1047,16 +1048,16 @@ class _PackageCard extends StatelessWidget {
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 Container(
-                  width: 76,
-                  height: 76,
+                  width: 56,
+                  height: 56,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: LinearGradient(
@@ -1066,70 +1067,77 @@ class _PackageCard extends StatelessWidget {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: gradientColors.last.withValues(alpha: 0.24),
-                        blurRadius: 20,
-                        offset: const Offset(0, 10),
+                        color: gradientColors.last.withValues(alpha: 0.22),
+                        blurRadius: 14,
+                        offset: const Offset(0, 6),
                       ),
                     ],
                   ),
                   alignment: Alignment.center,
                   child: Text(
                     previewValue > 0 ? '$previewValue' : '-',
-                    style: theme.textTheme.headlineSmall?.copyWith(
+                    style: theme.textTheme.titleLarge?.copyWith(
                       color: Colors.white,
                       fontWeight: FontWeight.w800,
+                      fontSize: 22,
                     ),
                   ),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         package.name ?? 'Unnamed package',
-                        style: theme.textTheme.titleMedium,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                        ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
                         package.price == null
                             ? 'Price not set'
                             : '${_formatAmount(package.price!)} sum',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: AppColors.primary,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        package.description?.trim().isNotEmpty == true
-                            ? package.description!.trim()
-                            : 'Simple package template',
-                        maxLines: 2,
+                        maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 if (isOwner)
-                  Wrap(
-                    spacing: 8,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
                         onPressed: isBusy ? null : onEdit,
-                        icon: const Icon(Icons.edit_rounded),
+                        icon: const Icon(Icons.edit_rounded, size: 19),
+                        visualDensity: VisualDensity.compact,
                         tooltip: 'Edit package',
                       ),
                       IconButton(
                         onPressed: isBusy ? null : onDelete,
-                        icon: const Icon(Icons.delete_outline_rounded),
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          size: 19,
+                        ),
+                        visualDensity: VisualDensity.compact,
                         tooltip: 'Delete package',
                       ),
                     ],
                   ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -1183,23 +1191,7 @@ class _PackageChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: theme.colorScheme.primary),
-          const SizedBox(width: 6),
-          Text(label, style: theme.textTheme.labelLarge),
-        ],
-      ),
-    );
+    return AppDataChip(icon: icon, label: label, tone: AppChipTone.primary);
   }
 }
 

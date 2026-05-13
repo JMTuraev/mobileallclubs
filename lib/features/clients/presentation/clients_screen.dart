@@ -8,6 +8,7 @@ import '../../../core/config/developer_tools.dart';
 import '../../../core/routing/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_client_list_item.dart';
+import '../../../core/widgets/app_data_chip.dart';
 import '../../../core/utils/phone_launcher.dart';
 import '../../../core/widgets/app_control_widgets.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
@@ -916,28 +917,11 @@ class _LockerBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return _BadgeFrame(
-      backgroundColor: _alpha(AppColors.accent, 0.18),
-      borderColor: _alpha(AppColors.accent, 0.46),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      constraints: const BoxConstraints(minHeight: 30, minWidth: 78),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.key_rounded, size: 15, color: AppColors.accent),
-          const SizedBox(width: 5),
-          Text(
-            value,
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: AppColors.accent,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
+    return AppDataChip(
+      icon: Icons.key_rounded,
+      label: value,
+      tone: AppChipTone.warning,
+      emphasis: true,
     );
   }
 }
@@ -957,19 +941,36 @@ class _PrimaryActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: label,
-      child: _BadgeFrame(
-        onTap: isBusy ? null : onTap,
-        backgroundColor: _alpha(AppColors.primary, 0.16),
-        borderColor: _alpha(AppColors.primary, 0.4),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        constraints: const BoxConstraints(minHeight: 30, minWidth: 78),
-        child: isBusy
-            ? const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Icon(Icons.lock_rounded, size: 16, color: AppColors.primary),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: isBusy ? null : onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            height: 28,
+            width: 40,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.30),
+                width: 1,
+              ),
+            ),
+            alignment: Alignment.center,
+            child: isBusy
+                ? const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    Icons.lock_outline_rounded,
+                    size: 15,
+                    color: AppColors.primaryDeep,
+                  ),
+          ),
+        ),
       ),
     );
   }

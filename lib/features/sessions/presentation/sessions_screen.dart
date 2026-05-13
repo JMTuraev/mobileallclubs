@@ -10,6 +10,7 @@ import '../../../core/routing/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_client_list_item.dart';
 import '../../../core/widgets/app_control_widgets.dart';
+import '../../../core/widgets/app_data_chip.dart';
 import '../../../core/widgets/app_date_range_filter_sheet.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
 import '../../../models/auth_bootstrap_models.dart';
@@ -1245,6 +1246,8 @@ class _SessionTransactionRow extends StatelessWidget {
   }
 }
 
+/// Thin wrapper that delegates to [AppDataChip] so legacy call sites in this
+/// file keep working while gaining the uniform design-system styling.
 class _InfoChip extends StatelessWidget {
   const _InfoChip({
     required this.icon,
@@ -1258,40 +1261,27 @@ class _InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = _sessionToneColors(tone);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            _sessionAlpha(colors.background, 0.92),
-            _sessionAlpha(colors.background, 0.76),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: _sessionAlpha(colors.border, 0.84)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: colors.foreground),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: colors.foreground,
-              fontSize: 11.2,
-            ),
-          ),
-        ],
-      ),
+    return AppDataChip(
+      icon: icon,
+      label: label,
+      tone: _toChipTone(tone),
     );
+  }
+}
+
+AppChipTone _toChipTone(_SessionTone tone) {
+  switch (tone) {
+    case _SessionTone.info:
+      return AppChipTone.primary;
+    case _SessionTone.success:
+      return AppChipTone.success;
+    case _SessionTone.warning:
+      return AppChipTone.warning;
+    case _SessionTone.danger:
+      return AppChipTone.danger;
+    case _SessionTone.subtle:
+    case _SessionTone.defaultTone:
+      return AppChipTone.neutral;
   }
 }
 
@@ -1425,35 +1415,10 @@ class _SessionMetricPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = _sessionToneColors(tone);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(15),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            _sessionAlpha(colors.background, 0.98),
-            _sessionAlpha(colors.background, 0.9),
-          ],
-        ),
-        border: Border.all(color: _sessionAlpha(colors.border, 0.88)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            value,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: colors.foreground,
-              fontSize: 10.8,
-            ),
-          ),
-        ],
-      ),
+    return AppDataChip(
+      label: value,
+      tone: _toChipTone(tone),
+      emphasis: true,
     );
   }
 }

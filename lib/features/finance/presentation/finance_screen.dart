@@ -7,6 +7,7 @@ import '../../../core/localization/app_currency.dart';
 import '../../../core/routing/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_control_widgets.dart';
+import '../../../core/widgets/app_data_chip.dart';
 import '../../../core/widgets/app_date_range_filter_sheet.dart';
 import '../../../core/widgets/app_person_avatar.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
@@ -653,46 +654,30 @@ class _FinanceMetricPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = _toneColors(theme, tone);
+    final hasLabel = label != null && label!.trim().isNotEmpty;
+    final chipLabel = hasLabel ? '${label!.trim()} $value' : value;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(15),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            _alpha(colors.background, 0.95),
-            _alpha(colors.background, 0.78),
-          ],
-        ),
-        border: Border.all(color: _alpha(colors.border, 0.88)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (label != null && label!.trim().isNotEmpty) ...[
-            Text(
-              label!,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: _alpha(AppColors.secondary, 0.86),
-                fontSize: 10.3,
-              ),
-            ),
-            const SizedBox(width: 6),
-          ],
-          Text(
-            value,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: colors.foreground,
-              fontSize: 10.8,
-            ),
-          ),
-        ],
-      ),
+    return AppDataChip(
+      label: chipLabel,
+      tone: _toChipTone(tone),
+      emphasis: true,
     );
+  }
+}
+
+AppChipTone _toChipTone(_FinanceTone tone) {
+  switch (tone) {
+    case _FinanceTone.info:
+      return AppChipTone.primary;
+    case _FinanceTone.success:
+      return AppChipTone.success;
+    case _FinanceTone.warning:
+      return AppChipTone.warning;
+    case _FinanceTone.danger:
+      return AppChipTone.danger;
+    case _FinanceTone.subtle:
+    case _FinanceTone.defaultTone:
+      return AppChipTone.neutral;
   }
 }
 
