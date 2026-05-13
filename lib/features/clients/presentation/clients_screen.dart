@@ -1135,12 +1135,8 @@ class _StatusPanel extends StatelessWidget {
 
     return Center(
       child: AppLiquidGlass(
-        borderRadius: BorderRadius.circular(30),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xD8243140), Color(0xC0131B24)],
-        ),
+        borderRadius: BorderRadius.circular(24),
+        gradient: AppGradients.panel,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,

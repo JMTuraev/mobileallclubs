@@ -1359,28 +1359,27 @@ BoxDecoration _sessionPanelDecoration({
   final colors = _sessionToneColors(tone);
 
   return BoxDecoration(
-    borderRadius: BorderRadius.circular(24),
+    borderRadius: BorderRadius.circular(22),
     gradient: LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: [
-        _sessionAlpha(AppColors.panel, 0.98),
-        _sessionAlpha(colors.background, 0.98),
+        _sessionAlpha(AppColors.panel, 1.0),
+        _sessionAlpha(colors.background, 0.92),
       ],
     ),
-    border: Border.all(
-      color: _sessionAlpha(
-        outlined ? colors.border : AppColors.border,
-        outlined ? 0.86 : 0.72,
-      ),
-    ),
-    boxShadow: [
-      BoxShadow(
-        color: _sessionAlpha(AppColors.ink, 0.06),
-        blurRadius: 18,
-        offset: const Offset(0, 8),
-      ),
-    ],
+    border: outlined
+        ? Border.all(color: _sessionAlpha(colors.border, 0.7), width: 1)
+        : null,
+    boxShadow: outlined
+        ? null
+        : [
+            BoxShadow(
+              color: const Color(0xFF1E3A5F).withValues(alpha: 0.05),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
   );
 }
 
@@ -1391,28 +1390,25 @@ BoxDecoration _sessionCardDecoration({
   final colors = _sessionToneColors(tone);
 
   return BoxDecoration(
-    borderRadius: BorderRadius.circular(24),
+    borderRadius: BorderRadius.circular(20),
     gradient: LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
       colors: emphasized
           ? [
-              _sessionAlpha(AppColors.panel, 0.99),
-              _sessionAlpha(colors.background, 0.98),
+              _sessionAlpha(AppColors.panel, 1.0),
+              _sessionAlpha(colors.background, 0.92),
             ]
-          : const [AppColors.panel, AppColors.panelRaised],
+          : const [AppColors.panel, Color(0xFFF7FAFE)],
     ),
-    border: Border.all(
-      color: _sessionAlpha(
-        emphasized ? colors.border : AppColors.border,
-        emphasized ? 0.9 : 0.84,
-      ),
-    ),
+    border: emphasized
+        ? Border.all(color: _sessionAlpha(colors.border, 0.45))
+        : null,
     boxShadow: [
       BoxShadow(
-        color: _sessionAlpha(AppColors.ink, 0.08),
-        blurRadius: 18,
-        offset: const Offset(0, 8),
+        color: const Color(0xFF1E3A5F).withValues(alpha: 0.05),
+        blurRadius: 16,
+        offset: const Offset(0, 4),
       ),
     ],
   );

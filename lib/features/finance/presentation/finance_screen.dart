@@ -715,22 +715,17 @@ class _FinanceCompactOverviewTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         child: Ink(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF202A36), Color(0xFF151C24)],
-            ),
-            border: Border.all(color: _alpha(AppColors.border, 0.84)),
+            borderRadius: BorderRadius.circular(20),
+            color: AppColors.panel,
             boxShadow: [
               BoxShadow(
-                color: _alpha(Colors.black, 0.18),
-                blurRadius: 18,
-                offset: const Offset(0, 10),
+                color: const Color(0xFF1E3A5F).withValues(alpha: 0.05),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
@@ -837,22 +832,17 @@ class _FinanceCompactTransactionTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onClientTap,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         child: Ink(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFF202A36), Color(0xFF151C24)],
-            ),
-            border: Border.all(color: _alpha(AppColors.border, 0.84)),
+            borderRadius: BorderRadius.circular(20),
+            color: AppColors.panel,
             boxShadow: [
               BoxShadow(
-                color: _alpha(Colors.black, 0.18),
-                blurRadius: 18,
-                offset: const Offset(0, 10),
+                color: const Color(0xFF1E3A5F).withValues(alpha: 0.05),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
               ),
             ],
           ),

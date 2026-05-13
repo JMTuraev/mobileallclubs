@@ -182,24 +182,29 @@ class _AppShellScaffoldState extends ConsumerState<AppShellScaffold> {
               ? SafeArea(
                   top: false,
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                     child: Align(
                       alignment: Alignment.bottomCenter,
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(maxWidth: 560),
-                        child: AppLiquidGlass(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 5,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(32),
+                            boxShadow: AppShadows.floating,
                           ),
-                          borderRadius: BorderRadius.circular(26),
-                          gradient: const LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [Color(0xFFFDFEFF), Color(0xFFF0F5FB)],
-                          ),
-                          child: SizedBox(
-                            height: 54,
+                          child: AppLiquidGlass(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 6,
+                            ),
+                            borderRadius: BorderRadius.circular(32),
+                            gradient: const LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Color(0xFFFFFFFF), Color(0xFFF3F7FD)],
+                            ),
+                            child: SizedBox(
+                              height: 56,
                             child: Row(
                               children: [
                                 Expanded(
@@ -253,7 +258,8 @@ class _AppShellScaffoldState extends ConsumerState<AppShellScaffold> {
                       ),
                     ),
                   ),
-                )
+                ),
+              )
               : null,
         ),
       ),
@@ -418,7 +424,7 @@ class _ProfileSectionTitle extends StatelessWidget {
   }
 }
 
-class _BottomItem extends StatelessWidget {
+class _BottomItem extends StatefulWidget {
   const _BottomItem({
     required this.icon,
     required this.selectedIcon,
@@ -434,56 +440,76 @@ class _BottomItem extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_BottomItem> createState() => _BottomItemState();
+}
+
+class _BottomItemState extends State<_BottomItem> {
+  bool _pressed = false;
+
+  void _setPressed(bool value) {
+    if (_pressed == value) return;
+    setState(() => _pressed = value);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final selected = widget.selected;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: onTap,
+          onTap: widget.onTap,
+          onHighlightChanged: _setPressed,
+          onTapCancel: () => _setPressed(false),
           borderRadius: BorderRadius.circular(22),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOutCubic,
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(22),
-              gradient: selected
-                  ? const LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [AppColors.primary, AppColors.accent],
-                    )
-                  : null,
-              border: Border.all(
-                color: selected
-                    ? AppColors.primary.withValues(alpha: 0.3)
-                    : Colors.transparent,
+          splashColor: AppColors.primary.withValues(alpha: 0.08),
+          highlightColor: Colors.transparent,
+          child: AnimatedScale(
+            duration: const Duration(milliseconds: 140),
+            scale: _pressed ? 0.95 : 1.0,
+            curve: Curves.easeOut,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(22),
+                gradient: selected ? AppGradients.primary : null,
+                boxShadow: selected
+                    ? [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.32),
+                          blurRadius: 14,
+                          offset: const Offset(0, 6),
+                        ),
+                      ]
+                    : null,
               ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  selected ? selectedIcon : icon,
-                  size: 20,
-                  color: selected ? Colors.white : AppColors.mutedInk,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    fontSize: 11.8,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    selected ? widget.selectedIcon : widget.icon,
+                    size: 20,
                     color: selected ? Colors.white : AppColors.mutedInk,
-                    fontWeight: FontWeight.w700,
                   ),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontSize: 11.8,
+                      color: selected ? Colors.white : AppColors.mutedInk,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

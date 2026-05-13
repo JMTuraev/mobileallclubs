@@ -121,46 +121,17 @@ class AppClientPresenceAvatar extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = _clientAvatarPalette(label, fallback);
 
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          AppClientCardAvatar(
-            label: label,
-            fallback: fallback,
-            imageUrl: imageUrl,
-            size: size,
-            backgroundColor: palette.background,
-            borderColor: palette.border,
-            foregroundColor: palette.foreground,
-            useSolidBackground: true,
-            showBorder: false,
-          ),
-          if (isOnline)
-            Positioned(
-              right: -1,
-              bottom: -1,
-              child: Container(
-                width: 16,
-                height: 16,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF22C55E),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.panel, width: 2.2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFF22C55E).withValues(alpha: 0.28),
-                      blurRadius: 10,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
+    return AppClientCardAvatar(
+      label: label,
+      fallback: fallback,
+      imageUrl: imageUrl,
+      size: size,
+      status: isOnline ? AppAvatarStatus.online : AppAvatarStatus.none,
+      backgroundColor: palette.background,
+      borderColor: palette.border,
+      foregroundColor: palette.foreground,
+      useSolidBackground: true,
+      showBorder: false,
     );
   }
 }

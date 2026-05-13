@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mobileallclubs/core/widgets/app_person_avatar.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
@@ -607,6 +608,12 @@ Future<void> _pumpMobileGoldenHarness(
 }
 
 void main() {
+  setUpAll(() {
+    // Suppress the avatar pulse animation in tests; otherwise pumpAndSettle
+    // never terminates because the ring repeats forever.
+    kAppPersonAvatarDisablePulse = true;
+  });
+
   testWidgets(
     'shows the bootstrap loading screen while session state resolves',
     (WidgetTester tester) async {
