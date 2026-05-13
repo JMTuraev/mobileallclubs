@@ -42,7 +42,7 @@ class AppLiquidGlass extends StatelessWidget {
                   const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [Color(0xE0263444), Color(0xBC141B24)],
+                    colors: [Color(0xFFFDFEFF), Color(0xFFF0F5FB)],
                   ),
               border:
                   border ??
@@ -51,13 +51,13 @@ class AppLiquidGlass extends StatelessWidget {
                   boxShadow ??
                   [
                     BoxShadow(
-                      color: Color(0x30000000),
-                      blurRadius: 24,
-                      offset: Offset(0, 14),
+                      color: Color(0x1416324F),
+                      blurRadius: 22,
+                      offset: Offset(0, 10),
                     ),
                     BoxShadow(
-                      color: AppColors.secondary.withValues(alpha: 0.12),
-                      blurRadius: 14,
+                      color: AppColors.primary.withValues(alpha: 0.08),
+                      blurRadius: 12,
                       offset: Offset(0, 2),
                     ),
                   ],

@@ -6,6 +6,7 @@ class GymTransactionSummary {
     this.clientId,
     this.subscriptionId,
     this.subscriptionStatus,
+    this.status,
     this.type,
     this.category,
     this.paymentMethod,
@@ -25,6 +26,7 @@ class GymTransactionSummary {
       clientId: _asString(data['clientId']),
       subscriptionId: _asString(data['subscriptionId']),
       subscriptionStatus: _asString(data['subscriptionStatus']),
+      status: _asString(data['status']),
       type: _normalizeType(_asString(data['type'])),
       category: _asString(data['category']),
       paymentMethod: _resolvePaymentMethod(data),
@@ -39,6 +41,7 @@ class GymTransactionSummary {
   final String? clientId;
   final String? subscriptionId;
   final String? subscriptionStatus;
+  final String? status;
   final String? type;
   final String? category;
   final String? paymentMethod;
@@ -51,6 +54,7 @@ class GymTransactionSummary {
 
   GymTransactionSummary copyWith({
     String? subscriptionStatus,
+    String? status,
     String? type,
     String? paymentMethod,
     String? sourceCollection,
@@ -60,6 +64,7 @@ class GymTransactionSummary {
       clientId: clientId,
       subscriptionId: subscriptionId,
       subscriptionStatus: subscriptionStatus ?? this.subscriptionStatus,
+      status: status ?? this.status,
       type: type ?? this.type,
       category: category,
       paymentMethod: paymentMethod ?? this.paymentMethod,

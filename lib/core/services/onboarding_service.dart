@@ -1,6 +1,8 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../utils/backend_action_error.dart';
+
 class CreateGymRequest {
   const CreateGymRequest({
     required this.name,
@@ -79,13 +81,13 @@ Future<CreateGymResult> createGymAndUser({
 
     return const CreateGymResult(success: true);
   } on FirebaseFunctionsException catch (error) {
-    final message =
-        error.details?.toString() ??
-        error.message ??
-        'Unknown onboarding error';
-    throw Exception(message);
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Unknown onboarding error'),
+    );
   } catch (error) {
-    throw Exception(error.toString());
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Unknown onboarding error'),
+    );
   }
 }
 
@@ -112,9 +114,19 @@ Future<ClearOnboardingLockResult> clearOnboardingLock({
     }
 
     return ClearOnboardingLockResult(success: true, uid: normalizedUid);
-  } on FirebaseFunctionsException {
-    throw Exception('Failed to clear onboarding lock');
+  } on FirebaseFunctionsException catch (error) {
+    throw Exception(
+      describeBackendActionError(
+        error,
+        fallback: 'Failed to clear onboarding lock',
+      ),
+    );
   } catch (error) {
-    throw Exception(error.toString());
+    throw Exception(
+      describeBackendActionError(
+        error,
+        fallback: 'Failed to clear onboarding lock',
+      ),
+    );
   }
 }

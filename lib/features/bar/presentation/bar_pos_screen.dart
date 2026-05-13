@@ -1,15 +1,26 @@
 import 'dart:async';
+import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../core/localization/app_currency.dart';
+import '../../../core/routing/app_router.dart';
+import '../../../core/utils/backend_action_error.dart';
 import '../../../core/widgets/app_backdrop.dart';
+import '../../../core/widgets/app_control_widgets.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
+import '../../../core/widgets/liquid_glass.dart';
 import '../../../models/auth_bootstrap_models.dart';
 import '../../../models/payment_amounts.dart';
 import '../../bootstrap/application/bootstrap_controller.dart';
 import '../../clients/application/client_detail_providers.dart';
 import '../../clients/domain/client_detail_models.dart';
+import '../../sessions/application/sessions_providers.dart';
+import '../../sessions/domain/gym_session_summary.dart';
 import '../application/bar_actions_service.dart';
 import '../application/bar_providers.dart';
 import '../domain/bar_category_summary.dart';
@@ -40,10 +51,21 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
   bool _statusIsError = false;
   bool _isLoadingDraft = true;
   bool _isPaying = false;
-  bool _isCheckingDebt = false;
-  final Set<String> _busyProductIds = <String>{};
-  final Set<String> _busyCheckIds = <String>{};
-  BarClientDebtSnapshot? _latestDebtSnapshot;
+  bool _isPreparingCartAction = false;
+  bool _isCreatingCategory = false;
+  bool _isCategoryComposerVisible = false;
+  final Set<String> _syncingProductIds = <String>{};
+  final Map<String, int> _queuedProductDeltas = <String, int>{};
+  final Map<String, int> _optimisticProductDeltas = <String, int>{};
+  final Map<String, _BarProductPreview> _optimisticProductPreviews =
+      <String, _BarProductPreview>{};
+  final ValueNotifier<_BarActiveCartState> _activeCartStateNotifier =
+      ValueNotifier(const _BarActiveCartState());
+  _BarActiveCartState? _pendingActiveCartState;
+  Map<String, int> _lastServerQuantities = <String, int>{};
+  final GlobalKey _cartActionKey = GlobalKey();
+  final TextEditingController _newCategoryController = TextEditingController();
+  final FocusNode _newCategoryFocusNode = FocusNode();
 
   @override
   void initState() {
@@ -84,10 +106,7 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
         return;
       }
 
-      _setStatus(
-        error.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
+      _setStatus(_readableError(error), isError: true);
     } finally {
       if (mounted) {
         setState(() => _isLoadingDraft = false);
@@ -96,61 +115,57 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
   }
 
   void _setStatus(String message, {required bool isError}) {
+    final normalizedMessage = isError
+        ? describeBackendActionError(message, fallback: message).trim()
+        : message.trim();
+    final resolvedMessage = normalizedMessage.isEmpty
+        ? (isError ? 'Something went wrong.' : message)
+        : normalizedMessage;
+
     setState(() {
-      _statusMessage = message;
+      _statusMessage = resolvedMessage;
       _statusIsError = isError;
     });
   }
 
-  Future<void> _addProduct(BarProductSummary product) async {
-    if (_busyProductIds.contains(product.id) || _isPaying) {
+  void _handleBack() {
+    final router = GoRouter.of(context);
+    if (router.canPop()) {
+      router.pop();
       return;
     }
 
-    setState(() {
-      _busyProductIds.add(product.id);
-    });
-
-    try {
-      final service = ref.read(barActionsServiceProvider);
-      final checkId =
-          _activeCheckId ??
-          await service.getOrCreateOpenCheck(
-            clientId: widget.clientId,
-            sessionId: widget.sessionId,
-          );
-
-      if (checkId == null || checkId.isEmpty) {
-        throw Exception('Unable to create or resolve the current bar check.');
-      }
-
-      await service.addItemToCheck(checkId: checkId, productId: product.id);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _activeCheckId = checkId;
-        _statusMessage = '${product.name} added to the active check.';
-        _statusIsError = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      _setStatus(
-        error.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _busyProductIds.remove(product.id);
-        });
-      }
+    final clientId = widget.clientId?.trim() ?? '';
+    if (!widget.isGuestMode && clientId.isNotEmpty) {
+      context.go(AppRoutes.clientsWithHighlight(clientId));
+      return;
     }
+
+    context.go(AppRoutes.barMenu);
+  }
+
+  @override
+  void dispose() {
+    _activeCartStateNotifier.dispose();
+    _newCategoryController.dispose();
+    _newCategoryFocusNode.dispose();
+    super.dispose();
+  }
+
+  Future<void> _addProduct(BarProductSummary product) async {
+    if (_isPaying) {
+      return;
+    }
+
+    _enqueueProductMutation(
+      productId: product.id,
+      delta: 1,
+      preview: _BarProductPreview(
+        productId: product.id,
+        name: product.name,
+        price: product.price ?? 0,
+      ),
+    );
   }
 
   Future<void> _increaseItem(BarCheckItem item) async {
@@ -158,26 +173,15 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
       return;
     }
 
-    try {
-      await ref
-          .read(barActionsServiceProvider)
-          .addItemToCheck(checkId: _activeCheckId!, productId: item.productId!);
-
-      if (!mounted) {
-        return;
-      }
-
-      _setStatus('${item.displayName} quantity increased.', isError: false);
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      _setStatus(
-        error.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
-    }
+    _enqueueProductMutation(
+      productId: item.productId!,
+      delta: 1,
+      preview: _BarProductPreview(
+        productId: item.productId!,
+        name: item.displayName,
+        price: item.unitPrice,
+      ),
+    );
   }
 
   Future<void> _removeItem(BarCheckItem item) async {
@@ -185,99 +189,110 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
       return;
     }
 
-    try {
-      await ref
-          .read(barActionsServiceProvider)
-          .removeItemFromCheck(
-            checkId: _activeCheckId!,
-            productId: item.productId!,
-          );
-
-      if (!mounted) {
-        return;
-      }
-
-      _setStatus(
-        '${item.displayName} updated in the active check.',
-        isError: false,
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      _setStatus(
-        error.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
-    }
-  }
-
-  Future<void> _voidCheck() async {
-    final checkId = _activeCheckId;
-    if (checkId == null || checkId.isEmpty || _isPaying) {
+    final productId = item.productId!;
+    if (_displayedQuantityForProduct(productId) <= 0) {
       return;
     }
 
-    try {
-      await ref.read(barActionsServiceProvider).voidCheck(checkId: checkId);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _activeCheckId = null;
-      });
-      _setStatus('The active draft check was voided.', isError: false);
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      _setStatus(
-        error.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
-    }
+    _enqueueProductMutation(
+      productId: productId,
+      delta: -1,
+      preview: _BarProductPreview(
+        productId: productId,
+        name: item.displayName,
+        price: item.unitPrice,
+      ),
+    );
   }
 
-  Future<void> _holdCheck() async {
+  Future<bool> _holdCheck() async {
     final checkId = _activeCheckId;
     if (checkId == null || checkId.isEmpty || _isPaying) {
-      return;
+      return false;
     }
 
     try {
       await ref.read(barActionsServiceProvider).holdCheck(checkId: checkId);
 
       if (!mounted) {
-        return;
+        return false;
       }
 
       setState(() {
         _activeCheckId = null;
+        _clearLocalCartState();
       });
-      _setStatus(
-        'The current draft check was saved for later.',
-        isError: false,
-      );
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Receipt saved for later.')),
+        );
+      return true;
     } catch (error) {
       if (!mounted) {
-        return;
+        return false;
       }
 
-      _setStatus(
-        error.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
+      _setStatus(_readableError(error), isError: true);
+      return false;
     }
   }
 
-  Future<void> _payCheck(num total) async {
-    final checkId = _activeCheckId;
-    if (checkId == null || checkId.isEmpty || total <= 0 || _isPaying) {
-      return;
+  bool get _hasQueuedCartMutations =>
+      _syncingProductIds.isNotEmpty ||
+      _queuedProductDeltas.values.any((delta) => delta != 0);
+
+  bool get _hasPendingCartActionCapability =>
+      (_activeCheckId?.trim().isNotEmpty ?? false) ||
+      _queuedProductDeltas.values.any((delta) => delta != 0) ||
+      _syncingProductIds.isNotEmpty ||
+      _optimisticProductDeltas.values.any((delta) => delta != 0);
+
+  Future<String?> _prepareActiveCartAction() async {
+    if (_isPaying || _isPreparingCartAction) {
+      return null;
+    }
+
+    setState(() => _isPreparingCartAction = true);
+    try {
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (mounted) {
+        final checkId = _activeCheckId?.trim() ?? '';
+        if (checkId.isNotEmpty && !_hasQueuedCartMutations) {
+          return checkId;
+        }
+
+        if (checkId.isEmpty && !_hasPendingCartActionCapability) {
+          return null;
+        }
+
+        if (DateTime.now().isAfter(deadline)) {
+          break;
+        }
+
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+      }
+
+      if (!mounted) {
+        return null;
+      }
+
+      _setStatus('Cart is still syncing. Please wait a moment.', isError: true);
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _isPreparingCartAction = false);
+      }
+    }
+  }
+
+  Future<bool> _payCheckById({
+    required String checkId,
+    required num total,
+    required bool clearActiveOnSuccess,
+  }) async {
+    if (checkId.trim().isEmpty || total <= 0 || _isPaying) {
+      return false;
     }
 
     final amounts = await showDialog<PaymentAmounts>(
@@ -286,7 +301,7 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
     );
 
     if (amounts == null) {
-      return;
+      return false;
     }
 
     setState(() => _isPaying = true);
@@ -297,23 +312,25 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
           .payCheck(checkId: checkId, methods: amounts.toJson());
 
       if (!mounted) {
-        return;
+        return false;
       }
 
       setState(() {
-        _activeCheckId = null;
+        if (clearActiveOnSuccess && _activeCheckId == checkId) {
+          _activeCheckId = null;
+          _clearLocalCartState();
+        }
         _statusMessage = 'Bar check paid successfully.';
         _statusIsError = false;
       });
+      return true;
     } catch (error) {
       if (!mounted) {
-        return;
+        return false;
       }
 
-      _setStatus(
-        error.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
+      _setStatus(_readableError(error), isError: true);
+      return false;
     } finally {
       if (mounted) {
         setState(() => _isPaying = false);
@@ -321,58 +338,16 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
     }
   }
 
-  Future<void> _checkClientDebt() async {
-    final clientId = widget.clientId?.trim() ?? '';
-    if (widget.isGuestMode || _isCheckingDebt || _isPaying || clientId.isEmpty) {
-      return;
+  Future<bool> _deleteCheck(BarSessionCheckSummary check) async {
+    if (_isPaying || check.id.trim().isEmpty) {
+      return false;
     }
 
-    setState(() => _isCheckingDebt = true);
-
-    try {
-      final debtSnapshot = await ref
-          .read(barActionsServiceProvider)
-          .checkClientDebt(clientId: clientId);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _latestDebtSnapshot = debtSnapshot;
-        _statusMessage = debtSnapshot.totalDebt > 0
-            ? 'Client debt refreshed. Total debt: ${_formatMoney(debtSnapshot.totalDebt)} so\'m.'
-            : 'Client debt refreshed. No unpaid draft or held checks were returned.';
-        _statusIsError = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      _setStatus(
-        error.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isCheckingDebt = false);
-      }
-    }
-  }
-
-  Future<void> _refundCheck(BarSessionCheckSummary check) async {
-    if (_busyCheckIds.contains(check.id) || _isPaying) {
-      return;
-    }
-
-    final shouldRefund = await showDialog<bool>(
+    final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Refund bar check'),
-        content: Text(
-          'Refund paid check ${check.id}? This uses the exact refundCheck callable from the working backend.',
-        ),
+        title: const Text('Delete check'),
+        content: const Text('Delete this check?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -380,51 +355,528 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Refund'),
+            child: const Text('Delete'),
           ),
         ],
       ),
     );
 
-    if (shouldRefund != true || !mounted) {
+    if (shouldDelete != true) {
+      return false;
+    }
+
+    setState(() => _isPaying = true);
+
+    try {
+      await ref.read(barActionsServiceProvider).voidCheck(checkId: check.id);
+
+      if (!mounted) {
+        return false;
+      }
+
+      setState(() {
+        if (_activeCheckId == check.id) {
+          _activeCheckId = null;
+          _clearLocalCartState();
+        }
+        _statusMessage = 'Check deleted.';
+        _statusIsError = false;
+      });
+      return true;
+    } catch (error) {
+      if (!mounted) {
+        return false;
+      }
+
+      _setStatus(_readableError(error), isError: true);
+      return false;
+    } finally {
+      if (mounted) {
+        setState(() => _isPaying = false);
+      }
+    }
+  }
+
+  Future<void> _openCartPanel() async {
+    final overlayBox =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final buttonBox =
+        _cartActionKey.currentContext?.findRenderObject() as RenderBox?;
+    final screenSize = MediaQuery.sizeOf(context);
+    final panelWidth = math.min(420.0, screenSize.width - 24);
+    final anchor = buttonBox?.localToGlobal(Offset.zero, ancestor: overlayBox);
+    final top = ((anchor?.dy ?? 72) + (buttonBox?.size.height ?? 0) + 8).clamp(
+      16.0,
+      screenSize.height - 260.0,
+    );
+
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Cart',
+      barrierColor: Colors.black.withValues(alpha: 0.22),
+      transitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        final navigator = Navigator.of(dialogContext, rootNavigator: true);
+        return Material(
+          type: MaterialType.transparency,
+          child: SafeArea(
+            child: Stack(
+              children: [
+                Positioned(
+                  top: top,
+                  right: 12,
+                  child: _BarCartPopover(
+                    width: panelWidth,
+                    maxHeight: math.min(screenSize.height * 0.76, 620.0),
+                    activeCartStateListenable: _activeCartStateNotifier,
+                    sessionId: widget.sessionId,
+                    isBusy: _isPaying || _isPreparingCartAction,
+                    onClose: () => Navigator.of(dialogContext).pop(),
+                    onIncrease: _increaseItem,
+                    onRemove: _removeItem,
+                    onHold: () async {
+                      final checkId = await _prepareActiveCartAction();
+                      if (checkId == null) {
+                        return;
+                      }
+                      if (navigator.mounted) {
+                        navigator.pop();
+                      }
+                      await _holdCheck();
+                    },
+                    onPayActive: (total) async {
+                      final checkId = await _prepareActiveCartAction();
+                      if (checkId == null) {
+                        return;
+                      }
+                      final success = await _payCheckById(
+                        checkId: checkId,
+                        total: total,
+                        clearActiveOnSuccess: true,
+                      );
+                      if (success && navigator.mounted) {
+                        navigator.pop();
+                      }
+                    },
+                    onPayHistory: (check) async {
+                      final success = await _payCheckById(
+                        checkId: check.id,
+                        total: check.totalAmount ?? 0,
+                        clearActiveOnSuccess: _activeCheckId == check.id,
+                      );
+                      if (success && navigator.mounted) {
+                        navigator.pop();
+                      }
+                    },
+                    onDeleteCheck: (check) async {
+                      final success = await _deleteCheck(check);
+                      if (success && navigator.mounted) {
+                        navigator.pop();
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+      transitionBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            alignment: Alignment.topRight,
+            scale: Tween<double>(begin: 0.96, end: 1).animate(curved),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  void _enqueueProductMutation({
+    required String productId,
+    required int delta,
+    required _BarProductPreview preview,
+  }) {
+    final normalizedProductId = productId.trim();
+    if (normalizedProductId.isEmpty || delta == 0) {
+      return;
+    }
+
+    if (delta < 0 && _displayedQuantityForProduct(normalizedProductId) <= 0) {
       return;
     }
 
     setState(() {
-      _busyCheckIds.add(check.id);
+      _optimisticProductPreviews[normalizedProductId] = preview;
+      _queuedProductDeltas[normalizedProductId] =
+          (_queuedProductDeltas[normalizedProductId] ?? 0) + delta;
+      final optimisticDelta =
+          (_optimisticProductDeltas[normalizedProductId] ?? 0) + delta;
+      if (optimisticDelta == 0) {
+        _optimisticProductDeltas.remove(normalizedProductId);
+      } else {
+        _optimisticProductDeltas[normalizedProductId] = optimisticDelta;
+      }
     });
 
+    unawaited(_flushProductMutations(normalizedProductId));
+  }
+
+  Future<void> _flushProductMutations(String productId) async {
+    if (_syncingProductIds.contains(productId)) {
+      return;
+    }
+
+    _syncingProductIds.add(productId);
+    final service = ref.read(barActionsServiceProvider);
+
     try {
-      await ref.read(barActionsServiceProvider).refundCheck(checkId: check.id);
+      while (mounted) {
+        final deltaToSync = _takeQueuedProductDelta(productId);
+        if (deltaToSync == 0) {
+          break;
+        }
+
+        try {
+          var checkId = _activeCheckId;
+          if (deltaToSync > 0) {
+            checkId =
+                checkId ??
+                await service.getOrCreateOpenCheck(
+                  clientId: widget.clientId,
+                  sessionId: widget.sessionId,
+                );
+
+            if (checkId == null || checkId.isEmpty) {
+              throw Exception(
+                'Unable to create or resolve the current bar check.',
+              );
+            }
+
+            await service.addItemToCheck(
+              checkId: checkId,
+              productId: productId,
+              qty: deltaToSync,
+            );
+
+            if (mounted && _activeCheckId != checkId) {
+              setState(() {
+                _activeCheckId = checkId;
+              });
+            }
+            continue;
+          }
+
+          if (checkId == null || checkId.isEmpty) {
+            throw Exception('There is no active bar check to update.');
+          }
+
+          await service.removeItemFromCheck(
+            checkId: checkId,
+            productId: productId,
+            qty: deltaToSync.abs(),
+          );
+        } catch (error) {
+          if (!mounted) {
+            return;
+          }
+
+          _revertOptimisticDelta(productId, deltaToSync);
+          _setStatus(_readableError(error), isError: true);
+        }
+      }
+    } finally {
+      _syncingProductIds.remove(productId);
+      _cleanupOptimisticPreview(productId);
+    }
+  }
+
+  int _takeQueuedProductDelta(String productId) {
+    final delta = _queuedProductDeltas[productId] ?? 0;
+    _queuedProductDeltas.remove(productId);
+    return delta;
+  }
+
+  void _revertOptimisticDelta(String productId, int delta) {
+    setState(() {
+      final nextDelta = (_optimisticProductDeltas[productId] ?? 0) - delta;
+      if (nextDelta == 0) {
+        _optimisticProductDeltas.remove(productId);
+      } else {
+        _optimisticProductDeltas[productId] = nextDelta;
+      }
+      _cleanupOptimisticPreview(productId);
+    });
+  }
+
+  int _displayedQuantityForProduct(String productId) {
+    final normalizedProductId = productId.trim();
+    return math.max(
+      0,
+      (_lastServerQuantities[normalizedProductId] ?? 0) +
+          (_optimisticProductDeltas[normalizedProductId] ?? 0),
+    );
+  }
+
+  void _reconcileOptimisticItems(List<BarCheckItem> serverItems) {
+    final currentQuantities = <String, int>{};
+    for (final item in serverItems) {
+      final productKey = _productKeyForItem(item);
+      if (productKey.isEmpty) {
+        continue;
+      }
+      currentQuantities[productKey] = item.quantity;
+    }
+
+    final trackedProductIds = <String>{
+      ..._lastServerQuantities.keys,
+      ...currentQuantities.keys,
+    };
+
+    for (final productId in trackedProductIds) {
+      final previousQuantity = _lastServerQuantities[productId] ?? 0;
+      final currentQuantity = currentQuantities[productId] ?? 0;
+      final reflectedDelta = currentQuantity - previousQuantity;
+      if (reflectedDelta == 0) {
+        continue;
+      }
+
+      final optimisticDelta = _optimisticProductDeltas[productId];
+      if (optimisticDelta == null || optimisticDelta == 0) {
+        continue;
+      }
+
+      final nextDelta = optimisticDelta - reflectedDelta;
+      if (nextDelta == 0) {
+        _optimisticProductDeltas.remove(productId);
+      } else {
+        _optimisticProductDeltas[productId] = nextDelta;
+      }
+    }
+
+    _lastServerQuantities = currentQuantities;
+    for (final productId in _optimisticProductPreviews.keys.toList()) {
+      _cleanupOptimisticPreview(productId);
+    }
+  }
+
+  List<BarCheckItem> _displayedCheckItems(List<BarCheckItem> serverItems) {
+    _reconcileOptimisticItems(serverItems);
+
+    final serverItemsByProduct = <String, BarCheckItem>{};
+    final orderedProductIds = <String>[];
+    for (final item in serverItems) {
+      final productKey = _productKeyForItem(item);
+      if (productKey.isEmpty || serverItemsByProduct.containsKey(productKey)) {
+        continue;
+      }
+      serverItemsByProduct[productKey] = item;
+      orderedProductIds.add(productKey);
+    }
+
+    for (final productId in _optimisticProductDeltas.keys) {
+      if (!serverItemsByProduct.containsKey(productId)) {
+        orderedProductIds.add(productId);
+      }
+    }
+
+    final displayedItems = <BarCheckItem>[];
+    for (final productId in orderedProductIds) {
+      final baseItem = serverItemsByProduct[productId];
+      final nextQuantity = math.max(
+        0,
+        (baseItem?.quantity ?? 0) + (_optimisticProductDeltas[productId] ?? 0),
+      );
+      if (nextQuantity <= 0) {
+        continue;
+      }
+
+      final preview = _optimisticProductPreviews[productId];
+      final unitPrice = baseItem?.unitPrice ?? preview?.price ?? 0;
+      displayedItems.add(
+        BarCheckItem(
+          id: baseItem?.id ?? 'optimistic-$productId',
+          checkId: baseItem?.checkId ?? _activeCheckId,
+          productId: baseItem?.productId ?? productId,
+          name: baseItem?.name ?? preview?.name ?? productId,
+          price: unitPrice,
+          qty: nextQuantity,
+          subtotal: unitPrice * nextQuantity,
+        ),
+      );
+    }
+
+    return displayedItems;
+  }
+
+  String _productKeyForItem(BarCheckItem item) {
+    final productId = item.productId?.trim() ?? '';
+    if (productId.isNotEmpty) {
+      return productId;
+    }
+
+    return item.id.trim();
+  }
+
+  void _cleanupOptimisticPreview(String productId) {
+    final normalizedProductId = productId.trim();
+    final hasServerValue =
+        (_lastServerQuantities[normalizedProductId] ?? 0) > 0;
+    final hasOptimisticValue =
+        (_optimisticProductDeltas[normalizedProductId] ?? 0) != 0;
+    final hasQueuedValue =
+        (_queuedProductDeltas[normalizedProductId] ?? 0) != 0;
+
+    if (!hasServerValue && !hasOptimisticValue && !hasQueuedValue) {
+      _optimisticProductPreviews.remove(normalizedProductId);
+    }
+  }
+
+  void _clearLocalCartState() {
+    _queuedProductDeltas.clear();
+    _optimisticProductDeltas.clear();
+    _optimisticProductPreviews.clear();
+    _lastServerQuantities = <String, int>{};
+    _activeCartStateNotifier.value = const _BarActiveCartState();
+  }
+
+  void _syncActiveCartState({
+    required List<BarCheckItem> items,
+    required bool isLoading,
+  }) {
+    final nextState = _BarActiveCartState(
+      activeCheckId: _activeCheckId,
+      items: List<BarCheckItem>.unmodifiable(items),
+      isLoading: isLoading,
+      canSubmit: items.isNotEmpty && _hasPendingCartActionCapability,
+    );
+
+    if (_sameBarActiveCartState(_activeCartStateNotifier.value, nextState) &&
+        _pendingActiveCartState == null) {
+      return;
+    }
+
+    _pendingActiveCartState = nextState;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final pendingState = _pendingActiveCartState;
+      if (pendingState == null) {
+        return;
+      }
+      _pendingActiveCartState = null;
+      if (_sameBarActiveCartState(
+        _activeCartStateNotifier.value,
+        pendingState,
+      )) {
+        return;
+      }
+      _activeCartStateNotifier.value = pendingState;
+    });
+  }
+
+  GymSessionSummary? _resolveCurrentSession(List<GymSessionSummary>? sessions) {
+    final sessionId = widget.sessionId?.trim() ?? '';
+    if (sessionId.isEmpty || sessions == null) {
+      return null;
+    }
+
+    for (final session in sessions) {
+      if (session.id == sessionId) {
+        return session;
+      }
+    }
+
+    return null;
+  }
+
+  void _showCategoryComposer() {
+    if (_isCreatingCategory) {
+      return;
+    }
+
+    if (_isCategoryComposerVisible) {
+      _newCategoryFocusNode.requestFocus();
+      return;
+    }
+
+    setState(() => _isCategoryComposerVisible = true);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _newCategoryFocusNode.requestFocus();
+    });
+  }
+
+  void _hideCategoryComposer() {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _isCategoryComposerVisible = false;
+      _newCategoryController.clear();
+    });
+  }
+
+  Future<void> _createCategory() async {
+    if (_isCreatingCategory) {
+      return;
+    }
+
+    final normalizedName = _newCategoryController.text.trim();
+    if (normalizedName.isEmpty) {
+      _setStatus('Category name is required.', isError: true);
+      return;
+    }
+
+    FocusScope.of(context).unfocus();
+
+    setState(() => _isCreatingCategory = true);
+
+    try {
+      await ref
+          .read(barActionsServiceProvider)
+          .createCategory(
+            request: BarCategoryUpsertRequest(name: normalizedName),
+          );
 
       if (!mounted) {
         return;
       }
 
-      _setStatus('Paid check ${check.id} refunded.', isError: false);
+      setState(() {
+        _isCategoryComposerVisible = false;
+        _newCategoryController.clear();
+        _statusMessage = 'Category created.';
+        _statusIsError = false;
+      });
     } catch (error) {
       if (!mounted) {
         return;
       }
 
-      _setStatus(
-        error.toString().replaceFirst('Exception: ', ''),
-        isError: true,
-      );
+      _setStatus(_readableError(error), isError: true);
     } finally {
       if (mounted) {
-        setState(() {
-          _busyCheckIds.remove(check.id);
-        });
+        setState(() => _isCreatingCategory = false);
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(appCurrencyProvider);
     final resolvedSession = ref.watch(bootstrapControllerProvider).session;
     final categoriesAsync = ref.watch(currentGymBarCategoriesProvider);
     final productsAsync = ref.watch(currentGymBarProductsProvider);
+    final sessionsAsync = widget.isGuestMode
+        ? const AsyncValue<List<GymSessionSummary>>.data(<GymSessionSummary>[])
+        : ref.watch(currentGymSessionsStreamProvider);
     final checkItemsAsync = _activeCheckId == null
         ? const AsyncValue<List<BarCheckItem>>.data(<BarCheckItem>[])
         : ref.watch(barCheckItemsProvider(_activeCheckId!));
@@ -435,19 +887,66 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
         : ref.watch(
             currentGymClientDocumentProvider(widget.clientId?.trim() ?? ''),
           );
-    final sessionChecksAsync = widget.isGuestMode
-        ? const AsyncValue<List<BarSessionCheckSummary>>.data(
-            <BarSessionCheckSummary>[],
-          )
-        : ref.watch(barSessionChecksProvider(widget.sessionId?.trim() ?? ''));
-
+    final currentSession = _resolveCurrentSession(
+      _asyncValueData<List<GymSessionSummary>>(sessionsAsync),
+    );
+    final serverCheckItems =
+        _asyncValueData<List<BarCheckItem>>(checkItemsAsync) ??
+        const <BarCheckItem>[];
+    final checkItems = _displayedCheckItems(serverCheckItems);
+    final cartItemCount = checkItems.fold<int>(
+      0,
+      (sum, item) => sum + item.quantity,
+    );
+    _syncActiveCartState(
+      items: checkItems,
+      isLoading:
+          (_activeCheckId?.trim().isNotEmpty ?? false) &&
+          checkItemsAsync.isLoading &&
+          checkItems.isEmpty,
+    );
+    final canManageCategories = resolvedSession?.role == AllClubsRole.owner;
+    final appBarClientName = clientAsync.maybeWhen(
+      data: (client) =>
+          widget.isGuestMode ? 'Guest' : client?.fullName ?? 'Client',
+      orElse: () => widget.isGuestMode ? 'Guest' : 'Client',
+    );
+    final appBarLockerValue = currentSession?.displayLocker;
     return Scaffold(
-      appBar: AppBar(title: const Text('Bar POS')),
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        leading: IconButton(
+          onPressed: _handleBack,
+          icon: const Icon(Icons.arrow_back_rounded),
+          tooltip: 'Back',
+        ),
+        titleSpacing: 0,
+        title: Text(
+          appBarClientName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: _BarCartActionButton(
+              key: _cartActionKey,
+              itemCount: cartItemCount,
+              onTap: _openCartPanel,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: _BarAppKeyBadge(value: appBarLockerValue),
+          ),
+        ],
+      ),
       body: AppBackdrop(
         child: SafeArea(
           top: false,
           child: AppShellBody(
-            maxWidth: 760,
+            maxWidth: 920,
+            expandHeight: true,
             child: clientAsync.when(
               loading: () => const _BarLoadingCard(
                 title: 'Client',
@@ -519,103 +1018,44 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
                                   selectedCategoryIdForView,
                             )
                             .toList(growable: false);
-                  final checkItems =
-                      checkItemsAsync.value ?? const <BarCheckItem>[];
-                  final total = checkItems.fold<num>(
-                    0,
-                    (sum, item) => sum + item.total,
-                  );
-                  final canRefundPaidChecks =
-                      resolvedSession?.role == AllClubsRole.owner;
 
-                  return SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _BarClientCard(
-                          clientName: widget.isGuestMode
-                              ? 'Guest'
-                              : client.fullName,
-                          phone: client.phone,
-                          sessionId: widget.sessionId,
-                          activeCheckId: _activeCheckId,
-                          isGuestMode: widget.isGuestMode,
-                        ),
-                        if (_statusMessage != null) ...[
-                          const SizedBox(height: 12),
-                          _BarStatusCard(
-                            title: _statusIsError
-                                ? 'Bar action failed'
-                                : 'Bar POS',
-                            message: _statusMessage!,
-                            isError: _statusIsError,
-                          ),
-                        ],
-                        const SizedBox(height: 12),
-                        _BarCategoriesCard(
-                          categories: categories,
-                          selectedCategoryId: selectedCategoryIdForView,
-                          onSelect: (categoryId) {
-                            setState(() {
-                              _selectedCategoryId = categoryId;
-                            });
-                          },
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_statusMessage != null && _statusIsError) ...[
+                        _BarStatusCard(
+                          title: 'Bar action failed',
+                          message: _statusMessage!,
+                          isError: _statusIsError,
                         ),
                         const SizedBox(height: 12),
-                        _BarProductsCard(
+                      ],
+                      _BarCategoryRail(
+                        categories: categories,
+                        selectedCategoryId: selectedCategoryIdForView,
+                        onSelect: (categoryId) {
+                          setState(() {
+                            _selectedCategoryId = categoryId;
+                          });
+                        },
+                        onAddCategory: canManageCategories
+                            ? _showCategoryComposer
+                            : null,
+                        onCancelAddCategory: _hideCategoryComposer,
+                        onSaveCategory: _createCategory,
+                        isAddingCategory: _isCreatingCategory,
+                        isComposerVisible: _isCategoryComposerVisible,
+                        composerController: _newCategoryController,
+                        composerFocusNode: _newCategoryFocusNode,
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: _BarProductGrid(
                           products: filteredProducts,
-                          busyProductIds: _busyProductIds,
                           onAdd: _addProduct,
                         ),
-                        const SizedBox(height: 12),
-                        _BarCartCard(
-                          checkItems: checkItems,
-                          total: total,
-                          isBusy: _isPaying,
-                          activeCheckId: _activeCheckId,
-                          onIncrease: _increaseItem,
-                          onRemove: _removeItem,
-                          onHold: _holdCheck,
-                          onVoid: _voidCheck,
-                          onPay: () => _payCheck(total),
-                        ),
-                        const SizedBox(height: 12),
-                        if (!widget.isGuestMode) ...[
-                          _BarDebtCard(
-                            debtSnapshot: _latestDebtSnapshot,
-                            isChecking: _isCheckingDebt,
-                            onCheckDebt: _checkClientDebt,
-                          ),
-                          const SizedBox(height: 12),
-                          sessionChecksAsync.when(
-                            loading: () => const _BarLoadingCard(
-                              title: 'Check history',
-                              message:
-                                  'Loading session-linked bar checks from gyms/{gymId}/barChecks...',
-                            ),
-                            error: (error, stackTrace) => _BarStatusCard(
-                              title: 'Check history unavailable',
-                              message: error.toString(),
-                              isError: true,
-                            ),
-                            data: (checks) => _BarSessionChecksCard(
-                              checks: checks,
-                              canRefundPaidChecks: canRefundPaidChecks,
-                              busyCheckIds: _busyCheckIds,
-                              onRefund: _refundCheck,
-                            ),
-                          ),
-                        ] else ...[
-                          _BarStatusCard(
-                            title: 'Guest POS',
-                            message:
-                                'Guest mode follows the web contract: createCheck with null clientId and null sessionId. Client debt and session-linked history do not apply here.',
-                            isError: false,
-                          ),
-                        ],
-                        const SizedBox(height: 24),
-                      ],
-                    ),
+                      ),
+                    ],
                   );
                 } catch (error, stackTrace) {
                   debugPrint('[BarPosScreen] build failure: $error');
@@ -638,195 +1078,435 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
   }
 }
 
-class _BarClientCard extends StatelessWidget {
-  const _BarClientCard({
-    required this.clientName,
-    required this.phone,
-    required this.sessionId,
-    required this.activeCheckId,
-    required this.isGuestMode,
-  });
+class _BarAppKeyBadge extends StatelessWidget {
+  const _BarAppKeyBadge({this.value});
 
-  final String clientName;
-  final String? phone;
-  final String? sessionId;
-  final String? activeCheckId;
-  final bool isGuestMode;
+  final String? value;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final label = value?.trim().isNotEmpty == true ? value!.trim() : '-';
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              isGuestMode ? 'Guest POS' : 'Current session',
-              style: theme.textTheme.titleLarge,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.key_rounded, size: 16, color: theme.colorScheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: theme.textTheme.labelLarge?.copyWith(
+              fontWeight: FontWeight.w700,
             ),
-            const SizedBox(height: 12),
-            Text(clientName, style: theme.textTheme.headlineSmall),
-            if (phone != null) ...[
-              const SizedBox(height: 8),
-              Text(phone!, style: theme.textTheme.bodyLarge),
-            ],
-            if (isGuestMode) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Guest checks are created without a linked client or session, matching the web POS flow.',
-                style: theme.textTheme.bodyMedium,
-              ),
-            ] else if (sessionId != null && sessionId!.trim().isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Session ID $sessionId',
-                style: theme.textTheme.bodyMedium,
-              ),
-            ],
-            if (activeCheckId != null && activeCheckId!.trim().isNotEmpty)
-              Text(
-                'Draft check $activeCheckId',
-                style: theme.textTheme.bodyMedium,
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _BarCategoriesCard extends StatelessWidget {
-  const _BarCategoriesCard({
+class _BarProductPreview {
+  const _BarProductPreview({
+    required this.productId,
+    required this.name,
+    required this.price,
+  });
+
+  final String productId;
+  final String name;
+  final num price;
+}
+
+class _BarActiveCartState {
+  const _BarActiveCartState({
+    this.activeCheckId,
+    this.items = const <BarCheckItem>[],
+    this.isLoading = false,
+    this.canSubmit = false,
+  });
+
+  final String? activeCheckId;
+  final List<BarCheckItem> items;
+  final bool isLoading;
+  final bool canSubmit;
+}
+
+bool _sameBarActiveCartState(
+  _BarActiveCartState left,
+  _BarActiveCartState right,
+) {
+  if (left.activeCheckId != right.activeCheckId ||
+      left.isLoading != right.isLoading ||
+      left.canSubmit != right.canSubmit ||
+      left.items.length != right.items.length) {
+    return false;
+  }
+
+  for (var index = 0; index < left.items.length; index++) {
+    final leftItem = left.items[index];
+    final rightItem = right.items[index];
+    if (leftItem.id != rightItem.id ||
+        leftItem.productId != rightItem.productId ||
+        leftItem.quantity != rightItem.quantity ||
+        leftItem.unitPrice != rightItem.unitPrice ||
+        leftItem.total != rightItem.total) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+class _BarCategoryRail extends StatelessWidget {
+  const _BarCategoryRail({
     required this.categories,
     required this.selectedCategoryId,
     required this.onSelect,
+    required this.isAddingCategory,
+    required this.isComposerVisible,
+    required this.composerController,
+    required this.composerFocusNode,
+    this.onAddCategory,
+    this.onCancelAddCategory,
+    this.onSaveCategory,
   });
 
   final List<BarCategorySummary> categories;
   final String? selectedCategoryId;
   final ValueChanged<String> onSelect;
+  final VoidCallback? onAddCategory;
+  final VoidCallback? onCancelAddCategory;
+  final Future<void> Function()? onSaveCategory;
+  final bool isAddingCategory;
+  final bool isComposerVisible;
+  final TextEditingController composerController;
+  final FocusNode composerFocusNode;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final toggleComposerAction = isComposerVisible
+        ? onCancelAddCategory
+        : onAddCategory;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('Categories', style: theme.textTheme.titleLarge),
+            ),
+            if (toggleComposerAction != null)
+              IgnorePointer(
+                ignoring: isAddingCategory,
+                child: Opacity(
+                  opacity: isAddingCategory ? 0.62 : 1,
+                  child: AppGlassIconButton(
+                    icon: isComposerVisible
+                        ? Icons.close_rounded
+                        : Icons.add_rounded,
+                    onTap: toggleComposerAction,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (isComposerVisible) ...[
+          _BarCategoryComposer(
+            controller: composerController,
+            focusNode: composerFocusNode,
+            isBusy: isAddingCategory,
+            onCancel: onCancelAddCategory,
+            onSave: onSaveCategory,
+          ),
+          const SizedBox(height: 10),
+        ],
+        if (categories.isEmpty)
+          AppLiquidGlass(
+            borderRadius: BorderRadius.circular(22),
+            child: Text(
+              'No active categories yet.',
+              style: theme.textTheme.bodyMedium,
+            ),
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: categories
+                .map(
+                  (category) => _BarCategoryChip(
+                    label: category.name,
+                    selected: category.id == selectedCategoryId,
+                    onTap: () => onSelect(category.id),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+      ],
+    );
+  }
+}
+
+class _BarCategoryComposer extends StatelessWidget {
+  const _BarCategoryComposer({
+    required this.controller,
+    required this.focusNode,
+    required this.isBusy,
+    this.onCancel,
+    this.onSave,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool isBusy;
+  final VoidCallback? onCancel;
+  final Future<void> Function()? onSave;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Categories', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 12),
-            if (categories.isEmpty)
-              Text(
-                'No active bar categories were returned from the current gym.',
-                style: theme.textTheme.bodyMedium,
-              )
-            else
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: categories
-                    .map(
-                      (category) => ChoiceChip(
-                        label: Text(category.name),
-                        selected: category.id == selectedCategoryId,
-                        onSelected: (_) => onSelect(category.id),
-                      ),
-                    )
-                    .toList(growable: false),
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: controller,
+            focusNode: focusNode,
+            autofocus: true,
+            enabled: !isBusy,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(
+              labelText: 'Category name',
+              hintText: 'Drinks',
+            ),
+            onSubmitted: (_) => onSave?.call(),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              TextButton(
+                onPressed: isBusy ? null : onCancel,
+                child: const Text('Cancel'),
               ),
-          ],
-        ),
+              const Spacer(),
+              FilledButton.icon(
+                onPressed: isBusy ? null : () => onSave?.call(),
+                icon: isBusy
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check_rounded),
+                label: Text(isBusy ? 'Saving...' : 'Save'),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 }
 
-class _BarProductsCard extends StatelessWidget {
-  const _BarProductsCard({
-    required this.products,
-    required this.busyProductIds,
-    required this.onAdd,
-  });
+class _BarProductGrid extends StatelessWidget {
+  const _BarProductGrid({required this.products, required this.onAdd});
 
   final List<BarProductSummary> products;
-  final Set<String> busyProductIds;
   final ValueChanged<BarProductSummary> onAdd;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Products', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 12),
-            if (products.isEmpty)
-              Text(
-                'No active products matched the selected bar category.',
-                style: theme.textTheme.bodyMedium,
-              )
-            else
-              ...products.map((product) {
-                final isBusy = busyProductIds.contains(product.id);
-                final isOutOfStock = product.availableStock <= 0;
-
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Menu', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 12),
+        Expanded(
+          child: products.isEmpty
+              ? Align(
+                  alignment: Alignment.topCenter,
                   child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
                       color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                product.name,
-                                style: theme.textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '${_formatMoney(product.price ?? 0)} so\'m',
-                                style: theme.textTheme.bodyLarge,
-                              ),
-                              Text(
-                                'Stock ${product.availableStock}',
-                                style: theme.textTheme.bodyMedium,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        SizedBox(
-                          width: 108,
-                          child: FilledButton.tonal(
-                            onPressed: isBusy || isOutOfStock
-                                ? null
-                                : () => onAdd(product),
-                            child: Text(isBusy ? 'Adding...' : 'Add'),
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      'No active products matched the selected category.',
+                      style: theme.textTheme.bodyLarge,
                     ),
                   ),
-                );
-              }),
+                )
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    final childAspectRatio = width >= 760 ? 1.02 : 0.82;
+
+                    return GridView.builder(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      itemCount: products.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 12,
+                        crossAxisSpacing: 12,
+                        childAspectRatio: childAspectRatio,
+                      ),
+                      itemBuilder: (context, index) {
+                        final product = products[index];
+                        final isOutOfStock = product.availableStock <= 0;
+
+                        return _BarProductCard(
+                          product: product,
+                          isOutOfStock: isOutOfStock,
+                          onTap: isOutOfStock ? null : () => onAdd(product),
+                        );
+                      },
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BarCategoryChip extends StatelessWidget {
+  const _BarCategoryChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      labelStyle: theme.textTheme.labelLarge?.copyWith(
+        fontWeight: FontWeight.w600,
+      ),
+    );
+  }
+}
+
+class _BarProductCard extends StatelessWidget {
+  const _BarProductCard({
+    required this.product,
+    required this.isOutOfStock,
+    this.onTap,
+  });
+
+  final BarProductSummary product;
+  final bool isOutOfStock;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final normalizedImage = product.image?.trim() ?? '';
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: normalizedImage.isEmpty
+                  ? DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.surfaceContainerHighest,
+                      ),
+                      child: Icon(
+                        Icons.local_cafe_rounded,
+                        color: theme.colorScheme.primary,
+                        size: 30,
+                      ),
+                    )
+                  : Image.network(
+                      normalizedImage,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainerHighest,
+                            ),
+                            child: Icon(
+                              Icons.broken_image_rounded,
+                              color: theme.colorScheme.onSurfaceVariant,
+                              size: 30,
+                            ),
+                          ),
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    formatAppMoney(product.price ?? 0, withUnit: true),
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    isOutOfStock
+                        ? 'Out of stock'
+                        : 'Stock ${product.availableStock}',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isOutOfStock
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.tonal(
+                      onPressed: onTap,
+                      child: Text(isOutOfStock ? 'Unavailable' : 'Add'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -834,332 +1514,863 @@ class _BarProductsCard extends StatelessWidget {
   }
 }
 
-class _BarCartCard extends StatelessWidget {
-  const _BarCartCard({
-    required this.checkItems,
-    required this.total,
+class _BarCartActionButton extends StatelessWidget {
+  const _BarCartActionButton({
+    super.key,
+    required this.itemCount,
+    required this.onTap,
+  });
+
+  final int itemCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: onTap,
+            child: Ink(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: theme.colorScheme.outlineVariant),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 14,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.shopping_basket_rounded,
+                color: theme.colorScheme.onSurface,
+              ),
+            ),
+          ),
+        ),
+        if (itemCount > 0)
+          Positioned(
+            top: -4,
+            right: -4,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: theme.colorScheme.surface, width: 2),
+              ),
+              child: Text(
+                '$itemCount',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _BarCartPopover extends ConsumerWidget {
+  const _BarCartPopover({
+    required this.width,
+    required this.maxHeight,
+    required this.activeCartStateListenable,
+    required this.sessionId,
     required this.isBusy,
-    required this.activeCheckId,
+    required this.onClose,
     required this.onIncrease,
     required this.onRemove,
     required this.onHold,
-    required this.onVoid,
+    required this.onPayActive,
+    required this.onPayHistory,
+    required this.onDeleteCheck,
+  });
+
+  final double width;
+  final double maxHeight;
+  final ValueListenable<_BarActiveCartState> activeCartStateListenable;
+  final String? sessionId;
+  final bool isBusy;
+  final VoidCallback onClose;
+  final ValueChanged<BarCheckItem> onIncrease;
+  final ValueChanged<BarCheckItem> onRemove;
+  final Future<void> Function() onHold;
+  final Future<void> Function(num total) onPayActive;
+  final Future<void> Function(BarSessionCheckSummary check) onPayHistory;
+  final Future<void> Function(BarSessionCheckSummary check) onDeleteCheck;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final normalizedSessionId = sessionId?.trim() ?? '';
+    final historyAsync = normalizedSessionId.isEmpty
+        ? const AsyncValue<List<BarSessionCheckSummary>>.data(
+            <BarSessionCheckSummary>[],
+          )
+        : ref.watch(barSessionChecksProvider(normalizedSessionId));
+    final historyChecks = historyAsync.maybeWhen(
+      data: (checks) => checks,
+      orElse: () => const <BarSessionCheckSummary>[],
+    );
+
+    return DefaultTabController(
+      length: 2,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          width: width,
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 24,
+                offset: const Offset(0, 14),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 10, 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.shopping_basket_rounded,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text('Cart', style: theme.textTheme.titleLarge),
+                    ),
+                    IconButton(
+                      onPressed: onClose,
+                      icon: const Icon(Icons.close_rounded),
+                      tooltip: 'Close',
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const TabBar(
+                    tabs: [
+                      Tab(text: 'Active'),
+                      Tab(text: 'History'),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: TabBarView(
+                  children: [
+                    ValueListenableBuilder<_BarActiveCartState>(
+                      valueListenable: activeCartStateListenable,
+                      builder: (context, activeCartState, child) {
+                        final normalizedActiveCheckId =
+                            activeCartState.activeCheckId?.trim() ?? '';
+                        final activeCheck = _findCheckById(
+                          historyChecks,
+                          normalizedActiveCheckId,
+                        );
+                        final activeCheckNumber = _checkNumberForId(
+                          historyChecks,
+                          normalizedActiveCheckId,
+                        );
+
+                        return _BarCartActiveTab(
+                          activeCheckId: normalizedActiveCheckId,
+                          activeCheck: activeCheck,
+                          activeCheckNumber: activeCheckNumber,
+                          items: activeCartState.items,
+                          isLoading: activeCartState.isLoading,
+                          isBusy: isBusy,
+                          canSubmit: activeCartState.canSubmit,
+                          onIncrease: onIncrease,
+                          onRemove: onRemove,
+                          onHold: onHold,
+                          onPay: onPayActive,
+                        );
+                      },
+                    ),
+                    _BarCartHistoryTab(
+                      historyAsync: historyAsync,
+                      isBusy: isBusy,
+                      onPay: onPayHistory,
+                      onDelete: onDeleteCheck,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BarCartActiveTab extends StatelessWidget {
+  const _BarCartActiveTab({
+    required this.activeCheckId,
+    required this.activeCheck,
+    required this.activeCheckNumber,
+    required this.items,
+    required this.isLoading,
+    required this.isBusy,
+    required this.canSubmit,
+    required this.onIncrease,
+    required this.onRemove,
+    required this.onHold,
     required this.onPay,
   });
 
-  final List<BarCheckItem> checkItems;
-  final num total;
+  final String activeCheckId;
+  final BarSessionCheckSummary? activeCheck;
+  final int? activeCheckNumber;
+  final List<BarCheckItem> items;
+  final bool isLoading;
   final bool isBusy;
-  final String? activeCheckId;
+  final bool canSubmit;
   final ValueChanged<BarCheckItem> onIncrease;
   final ValueChanged<BarCheckItem> onRemove;
-  final VoidCallback onHold;
-  final VoidCallback onVoid;
-  final VoidCallback onPay;
+  final Future<void> Function() onHold;
+  final Future<void> Function(num total) onPay;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    if (isLoading && items.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(20),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
+    final total = items.fold<num>(0, (sum, item) => sum + item.total);
+    final hasOpenCheck = activeCheckId.isNotEmpty || items.isNotEmpty;
+    final canSubmitCart = canSubmit && total > 0 && !isBusy;
+
+    if (!hasOpenCheck || items.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: _BarCartEmptyState(
+          title: 'No active receipt',
+          message: 'Tap a menu item to start a receipt.',
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: theme.colorScheme.outlineVariant),
+        ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Current check', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 12),
-            if (checkItems.isEmpty)
-              Text(
-                activeCheckId == null
-                    ? 'No draft bar check is open for this session yet.'
-                    : 'The current draft check is empty.',
-                style: theme.textTheme.bodyMedium,
-              )
-            else ...[
-              ...checkItems.map(
-                (item) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                item.displayName,
-                                style: theme.textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                '${_formatMoney(item.unitPrice)} so\'m × ${item.quantity}',
-                                style: theme.textTheme.bodyMedium,
-                              ),
-                            ],
-                          ),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Check #${activeCheckNumber ?? 1}',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: theme.colorScheme.primary,
                         ),
-                        const SizedBox(width: 12),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            SizedBox(
-                              width: 52,
-                              child: FilledButton.tonal(
-                                onPressed: isBusy
-                                    ? null
-                                    : () => onIncrease(item),
-                                child: const Text('+'),
-                              ),
-                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          _BarCheckStatusPill(status: activeCheck?.status),
+                          if (activeCheck?.createdAt != null) ...[
                             const SizedBox(width: 8),
-                            SizedBox(
-                              width: 52,
-                              child: FilledButton.tonal(
-                                onPressed: isBusy ? null : () => onRemove(item),
-                                child: const Text('−'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text('Total', style: theme.textTheme.titleMedium),
-                  ),
-                  Text(
-                    '${_formatMoney(total)} so\'m',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                children: [
-                  FilledButton.icon(
-                    onPressed: isBusy ? null : onPay,
-                    icon: const Icon(Icons.payments_rounded),
-                    label: Text(isBusy ? 'Paying...' : 'Pay check'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: isBusy ? null : onHold,
-                    icon: const Icon(Icons.pause_circle_outline_rounded),
-                    label: const Text('Hold check'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: isBusy ? null : onVoid,
-                    icon: const Icon(Icons.delete_forever_rounded),
-                    label: const Text('Void draft'),
-                  ),
-                ],
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BarDebtCard extends StatelessWidget {
-  const _BarDebtCard({
-    required this.debtSnapshot,
-    required this.isChecking,
-    required this.onCheckDebt,
-  });
-
-  final BarClientDebtSnapshot? debtSnapshot;
-  final bool isChecking;
-  final VoidCallback onCheckDebt;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Client debt', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 12),
-            Text(
-              debtSnapshot == null
-                  ? 'Run the exact checkClientDebt callable to inspect unpaid draft or held checks for this client.'
-                  : 'Total debt ${_formatMoney(debtSnapshot!.totalDebt)} so\'m across ${debtSnapshot!.unpaidChecks.length} unpaid checks.',
-              style: theme.textTheme.bodyLarge,
-            ),
-            if (debtSnapshot != null &&
-                debtSnapshot!.unpaidChecks.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              ...debtSnapshot!.unpaidChecks.map(
-                (check) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Check ${check.id}',
-                          style: theme.textTheme.labelLarge,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Status ${check.status ?? 'unknown'}',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                        Text(
-                          'Debt ${_formatMoney(check.debtAmount ?? check.totalAmount ?? 0)} so\'m',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            FilledButton.tonalIcon(
-              onPressed: isChecking ? null : onCheckDebt,
-              icon: const Icon(Icons.receipt_long_rounded),
-              label: Text(isChecking ? 'Checking...' : 'Check debt'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _BarSessionChecksCard extends StatelessWidget {
-  const _BarSessionChecksCard({
-    required this.checks,
-    required this.canRefundPaidChecks,
-    required this.busyCheckIds,
-    required this.onRefund,
-  });
-
-  final List<BarSessionCheckSummary> checks;
-  final bool canRefundPaidChecks;
-  final Set<String> busyCheckIds;
-  final ValueChanged<BarSessionCheckSummary> onRefund;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Check history', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 12),
-            if (checks.isEmpty)
-              Text(
-                'No bar checks were returned for this session yet.',
-                style: theme.textTheme.bodyLarge,
-              )
-            else
-              ...checks.map(
-                (check) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Check ${check.id}',
-                                style: theme.textTheme.titleMedium,
-                              ),
-                            ),
                             Text(
-                              check.displayStatus,
-                              style: theme.textTheme.labelLarge,
+                              _formatCheckTime(activeCheck!.createdAt!),
+                              style: theme.textTheme.bodySmall,
                             ),
                           ],
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Total ${_formatMoney(check.totalAmount ?? 0)} so\'m',
-                          style: theme.textTheme.bodyLarge,
-                        ),
-                        Text(
-                          'Paid ${_formatMoney(check.paidAmount ?? 0)} so\'m',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                        Text(
-                          'Debt ${_formatMoney(check.debtAmount ?? 0)} so\'m',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                        if (check.itemCount != null)
-                          Text(
-                            '${check.itemCount} items',
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        if (check.createdAt != null)
-                          Text(
-                            'Created ${_formatDateTime(check.createdAt)}',
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        if (canRefundPaidChecks && check.isPaid) ...[
-                          const SizedBox(height: 10),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: FilledButton.tonalIcon(
-                              onPressed: busyCheckIds.contains(check.id)
-                                  ? null
-                                  : () => onRefund(check),
-                              icon: const Icon(Icons.undo_rounded),
-                              label: Text(
-                                busyCheckIds.contains(check.id)
-                                    ? 'Refunding...'
-                                    : 'Refund paid check',
-                              ),
-                            ),
-                          ),
                         ],
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
+                Text(
+                  formatAppMoney(total, withUnit: true),
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Divider(color: theme.colorScheme.outlineVariant),
+            ),
+            Expanded(
+              child: ListView.separated(
+                itemCount: items.length,
+                separatorBuilder: (_, _) =>
+                    Divider(color: theme.colorScheme.outlineVariant, height: 1),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return _BarCheckoutItemRow(
+                    item: item,
+                    isBusy: isBusy,
+                    onIncrease: () => onIncrease(item),
+                    onRemove: () => onRemove(item),
+                    embedded: true,
+                  );
+                },
               ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Divider(color: theme.colorScheme.outlineVariant),
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: canSubmitCart ? () => onPay(total) : null,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.green.shade600,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.payments_rounded),
+                    label: Text(isBusy ? 'Please wait...' : 'Payment'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: canSubmitCart ? onHold : null,
+                    icon: const Icon(Icons.schedule_rounded),
+                    label: const Text('Later'),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _BarCartHistoryTab extends StatelessWidget {
+  const _BarCartHistoryTab({
+    required this.historyAsync,
+    required this.isBusy,
+    required this.onPay,
+    required this.onDelete,
+  });
+
+  final AsyncValue<List<BarSessionCheckSummary>> historyAsync;
+  final bool isBusy;
+  final Future<void> Function(BarSessionCheckSummary check) onPay;
+  final Future<void> Function(BarSessionCheckSummary check) onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return historyAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.all(20),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, stackTrace) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: _BarCartEmptyState(
+          title: 'History unavailable',
+          message: error.toString(),
+        ),
+      ),
+      data: (checks) {
+        if (checks.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: _BarCartEmptyState(
+              title: 'No history yet',
+              message: 'Checks for this session will appear here.',
+            ),
+          );
+        }
+
+        return ListView.separated(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          itemCount: checks.length,
+          separatorBuilder: (_, _) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final check = checks[index];
+            return _BarHistoryCheckCard(
+              check: check,
+              checkNumber: index + 1,
+              isBusy: isBusy,
+              onPay: () => onPay(check),
+              onDelete: () => onDelete(check),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _BarHistoryCheckCard extends ConsumerStatefulWidget {
+  const _BarHistoryCheckCard({
+    required this.check,
+    required this.checkNumber,
+    required this.isBusy,
+    required this.onPay,
+    required this.onDelete,
+  });
+
+  final BarSessionCheckSummary check;
+  final int checkNumber;
+  final bool isBusy;
+  final VoidCallback onPay;
+  final VoidCallback onDelete;
+
+  @override
+  ConsumerState<_BarHistoryCheckCard> createState() =>
+      _BarHistoryCheckCardState();
+}
+
+class _BarHistoryCheckCardState extends ConsumerState<_BarHistoryCheckCard> {
+  bool _isExpanded = false;
+
+  void _toggleExpanded() {
+    setState(() => _isExpanded = !_isExpanded);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final check = widget.check;
+    final canPay =
+        (check.isDraft || check.isHeld) && (check.totalAmount ?? 0) > 0;
+    final canDelete = check.isDraft || check.isHeld;
+    final itemsAsync = _isExpanded
+        ? ref.watch(barCheckItemsProvider(check.id))
+        : const AsyncValue<List<BarCheckItem>>.data(<BarCheckItem>[]);
+    final actions = <Widget>[];
+
+    if (canPay) {
+      actions.add(
+        Expanded(
+          child: FilledButton(
+            onPressed: widget.isBusy ? null : widget.onPay,
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.green.shade600,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Payment'),
+          ),
+        ),
+      );
+    }
+
+    if (canDelete) {
+      actions
+        ..add(const SizedBox(width: 8))
+        ..add(
+          Expanded(
+            child: FilledButton.tonal(
+              onPressed: widget.isBusy ? null : widget.onDelete,
+              style: FilledButton.styleFrom(
+                backgroundColor: theme.colorScheme.errorContainer,
+                foregroundColor: theme.colorScheme.onErrorContainer,
+              ),
+              child: const Text('Delete'),
+            ),
+          ),
+        );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: _toggleExpanded,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Check #${widget.checkNumber}',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                      ),
+                      _BarCheckStatusPill(status: check.status),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          formatAppMoney(
+                            check.totalAmount ?? 0,
+                            withUnit: true,
+                          ),
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (check.createdAt != null) ...[
+                        Text(
+                          _formatCheckTime(check.createdAt!),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      Icon(
+                        _isExpanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (actions.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(children: actions),
+          ],
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            child: _isExpanded
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Column(
+                      children: [
+                        Divider(color: theme.colorScheme.outlineVariant),
+                        const SizedBox(height: 10),
+                        _BarHistoryItemsSection(itemsAsync: itemsAsync),
+                      ],
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BarHistoryItemsSection extends StatelessWidget {
+  const _BarHistoryItemsSection({required this.itemsAsync});
+
+  final AsyncValue<List<BarCheckItem>> itemsAsync;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return itemsAsync.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.all(20),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, stackTrace) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Text(
+          error.toString(),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onErrorContainer,
+          ),
+        ),
+      ),
+      data: (items) {
+        if (items.isEmpty) {
+          return Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              'No items found for this check.',
+              style: theme.textTheme.bodyMedium,
+            ),
+          );
+        }
+
+        final estimatedHeight = math.min(
+          math.max(items.length * 74.0, 76.0),
+          220.0,
+        );
+
+        return Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Scrollbar(
+            thumbVisibility: items.length > 2,
+            child: SizedBox(
+              height: estimatedHeight,
+              child: ListView.separated(
+                primary: false,
+                padding: const EdgeInsets.all(10),
+                itemCount: items.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  return _BarHistoryItemRow(item: item);
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _BarCheckStatusPill extends StatelessWidget {
+  const _BarCheckStatusPill({this.status});
+
+  final String? status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final normalized = status?.trim().toLowerCase() ?? 'unknown';
+    final Color background;
+    final Color foreground;
+
+    switch (normalized) {
+      case 'paid':
+        background = Colors.green.withValues(alpha: 0.16);
+        foreground = Colors.green.shade700;
+        break;
+      default:
+        background = Colors.orange.withValues(alpha: 0.18);
+        foreground = Colors.orange.shade800;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        normalized == 'paid' ? 'Paid' : 'Unpaid',
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: foreground,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _BarCartEmptyState extends StatelessWidget {
+  const _BarCartEmptyState({required this.title, required this.message});
+
+  final String title;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Center(
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.receipt_long_rounded,
+              color: theme.colorScheme.primary,
+              size: 28,
+            ),
+            const SizedBox(height: 10),
+            Text(title, style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BarCheckoutItemRow extends StatelessWidget {
+  const _BarCheckoutItemRow({
+    required this.item,
+    required this.isBusy,
+    required this.onIncrease,
+    required this.onRemove,
+    this.embedded = false,
+  });
+
+  final BarCheckItem item;
+  final bool isBusy;
+  final VoidCallback onIncrease;
+  final VoidCallback onRemove;
+  final bool embedded;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: embedded
+          ? const EdgeInsets.symmetric(vertical: 10)
+          : const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: embedded
+            ? Colors.transparent
+            : theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.displayName, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  '${formatAppMoney(item.unitPrice, withUnit: true)} x ${item.quantity}',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  formatAppMoney(item.total, withUnit: true),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton.outlined(
+            onPressed: isBusy ? null : onRemove,
+            icon: const Icon(Icons.remove_rounded),
+          ),
+          SizedBox(
+            width: 28,
+            child: Text(
+              '${item.quantity}',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.labelLarge,
+            ),
+          ),
+          IconButton.filledTonal(
+            onPressed: isBusy ? null : onIncrease,
+            icon: const Icon(Icons.add_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BarHistoryItemRow extends StatelessWidget {
+  const _BarHistoryItemRow({required this.item});
+
+  final BarCheckItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(item.displayName, style: theme.textTheme.titleSmall),
+                const SizedBox(height: 2),
+                Text(
+                  '${formatAppMoney(item.unitPrice, withUnit: true)} x ${item.quantity}',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          Text(
+            formatAppMoney(item.total, withUnit: true),
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1174,16 +2385,21 @@ class _BarPaymentDialog extends StatefulWidget {
   State<_BarPaymentDialog> createState() => _BarPaymentDialogState();
 }
 
+enum _PaymentMethod { cash, terminal, click, debt }
+
 class _BarPaymentDialogState extends State<_BarPaymentDialog> {
   late final TextEditingController _cashController;
   late final TextEditingController _terminalController;
   late final TextEditingController _clickController;
   late final TextEditingController _debtController;
+  _PaymentMethod _selectedMethod = _PaymentMethod.cash;
 
   @override
   void initState() {
     super.initState();
-    _cashController = TextEditingController(text: _formatMoney(widget.total));
+    _cashController = TextEditingController(
+      text: _formatMoneyDisplay(widget.total),
+    );
     _terminalController = TextEditingController(text: '0');
     _clickController = TextEditingController(text: '0');
     _debtController = TextEditingController(text: '0');
@@ -1206,63 +2422,131 @@ class _BarPaymentDialogState extends State<_BarPaymentDialog> {
     total: widget.total,
   );
 
+  TextEditingController _controllerFor(_PaymentMethod method) {
+    switch (method) {
+      case _PaymentMethod.cash:
+        return _cashController;
+      case _PaymentMethod.terminal:
+        return _terminalController;
+      case _PaymentMethod.click:
+        return _clickController;
+      case _PaymentMethod.debt:
+        return _debtController;
+    }
+  }
+
+  String _labelForMethod(_PaymentMethod method) {
+    switch (method) {
+      case _PaymentMethod.cash:
+        return 'Cash';
+      case _PaymentMethod.terminal:
+        return 'Card';
+      case _PaymentMethod.click:
+        return 'P2P';
+      case _PaymentMethod.debt:
+        return 'Debt';
+    }
+  }
+
+  IconData _iconForMethod(_PaymentMethod method) {
+    switch (method) {
+      case _PaymentMethod.cash:
+        return Icons.payments_rounded;
+      case _PaymentMethod.terminal:
+        return Icons.credit_card_rounded;
+      case _PaymentMethod.click:
+        return Icons.phone_android_rounded;
+      case _PaymentMethod.debt:
+        return Icons.schedule_rounded;
+    }
+  }
+
+  num _enteredFor(_PaymentMethod method) {
+    return _readAmount(_controllerFor(method));
+  }
+
+  num _remainingForSelection(_PaymentMethod method) {
+    final selectedAmount = _enteredFor(method);
+    final enteredWithoutSelected = _amounts.paidTotal - selectedAmount;
+    final remaining = widget.total - enteredWithoutSelected;
+    return remaining > 0 ? remaining : 0;
+  }
+
+  void _selectMethod(_PaymentMethod method) {
+    final controller = _controllerFor(method);
+    final currentValue = _readAmount(controller);
+    final suggestedValue = _remainingForSelection(method);
+
+    setState(() {
+      _selectedMethod = method;
+      if (currentValue <= 0 && suggestedValue > 0) {
+        controller.text = _formatMoneyDisplay(suggestedValue);
+        controller.selection = TextSelection.collapsed(
+          offset: controller.text.length,
+        );
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final amounts = _amounts;
+    final activeController = _controllerFor(_selectedMethod);
 
     return AlertDialog(
       title: const Text('Pay bar check'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Total ${_formatMoney(widget.total)} so\'m',
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Remaining ${_formatMoney(amounts.remaining)} so\'m',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: amounts.isBalanced
-                    ? Colors.green.shade600
-                    : theme.colorScheme.error,
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Total ${formatAppMoney(widget.total, withUnit: true)}',
+                style: theme.textTheme.titleMedium,
               ),
-            ),
-            const SizedBox(height: 16),
-            _PaymentField(
-              controller: _cashController,
-              label: 'Cash',
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 12),
-            _PaymentField(
-              controller: _terminalController,
-              label: 'Terminal',
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 12),
-            _PaymentField(
-              controller: _clickController,
-              label: 'Click',
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 12),
-            _PaymentField(
-              controller: _debtController,
-              label: 'Debt',
-              onChanged: (_) => setState(() {}),
-            ),
-          ],
+              const SizedBox(height: 8),
+              Text(
+                'Remaining ${formatAppMoney(amounts.remaining, withUnit: true)}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: amounts.isBalanced
+                      ? Colors.green.shade600
+                      : theme.colorScheme.error,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: _PaymentMethod.values
+                    .map(
+                      (method) => Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: _PaymentMethodNav(
+                            label: _labelForMethod(method),
+                            icon: _iconForMethod(method),
+                            isSelected: _selectedMethod == method,
+                            amount: _enteredFor(method),
+                            onTap: () => _selectMethod(method),
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(growable: false),
+              ),
+              const SizedBox(height: 14),
+              _PaymentSingleField(
+                controller: activeController,
+                label: _labelForMethod(_selectedMethod),
+                icon: _iconForMethod(_selectedMethod),
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+          ),
         ),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
         FilledButton(
           onPressed: amounts.isBalanced
               ? () => Navigator.of(context).pop(amounts)
@@ -1274,25 +2558,155 @@ class _BarPaymentDialogState extends State<_BarPaymentDialog> {
   }
 }
 
-class _PaymentField extends StatelessWidget {
-  const _PaymentField({
+class _PaymentMethodNav extends StatelessWidget {
+  const _PaymentMethodNav({
+    required this.label,
+    required this.icon,
+    required this.isSelected,
+    required this.amount,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool isSelected;
+  final num amount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Ink(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? theme.colorScheme.primaryContainer
+                : theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isSelected
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.outlineVariant,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    softWrap: false,
+                    style: theme.textTheme.labelMedium,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                amount > 0 ? _formatMoneyDisplay(amount) : '0',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PaymentSingleField extends StatelessWidget {
+  const _PaymentSingleField({
     required this.controller,
     required this.label,
+    required this.icon,
     required this.onChanged,
   });
 
   final TextEditingController controller;
   final String label;
+  final IconData icon;
   final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      keyboardType: TextInputType.number,
+      inputFormatters: const [_GroupedNumberInputFormatter()],
       onChanged: onChanged,
-      decoration: InputDecoration(labelText: label, hintText: '0'),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: '0',
+        prefixIcon: Icon(icon),
+      ),
     );
+  }
+}
+
+class _GroupedNumberInputFormatter extends TextInputFormatter {
+  const _GroupedNumberInputFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final digits = newValue.text.replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) {
+      return const TextEditingValue(text: '');
+    }
+
+    final formatted = _formatMoneyDisplay(int.parse(digits));
+    final digitsBeforeCursor = _countDigits(
+      newValue.text.substring(
+        0,
+        newValue.selection.extentOffset.clamp(0, newValue.text.length),
+      ),
+    );
+    final selectionOffset = _selectionOffsetForDigits(
+      formatted,
+      digitsBeforeCursor,
+    );
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: selectionOffset),
+    );
+  }
+
+  int _countDigits(String value) {
+    return value.replaceAll(RegExp(r'\D'), '').length;
+  }
+
+  int _selectionOffsetForDigits(String formatted, int digitCount) {
+    if (digitCount <= 0) {
+      return 0;
+    }
+
+    var seenDigits = 0;
+    for (var i = 0; i < formatted.length; i++) {
+      if (RegExp(r'\d').hasMatch(formatted[i])) {
+        seenDigits++;
+      }
+      if (seenDigits >= digitCount) {
+        return i + 1;
+      }
+    }
+
+    return formatted.length;
   }
 }
 
@@ -1338,6 +2752,12 @@ class _BarStatusCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final resolvedMessage = isError
+        ? describeBackendActionError(message, fallback: message).trim()
+        : message.trim();
+    final visibleMessage = resolvedMessage.isEmpty
+        ? (isError ? 'Something went wrong.' : message)
+        : resolvedMessage;
 
     return Card(
       color: isError
@@ -1351,7 +2771,7 @@ class _BarStatusCard extends StatelessWidget {
             Text(title, style: theme.textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(
-              message,
+              visibleMessage,
               style: theme.textTheme.bodyLarge?.copyWith(
                 color: isError
                     ? theme.colorScheme.onErrorContainer
@@ -1365,28 +2785,79 @@ class _BarStatusCard extends StatelessWidget {
   }
 }
 
-num _readAmount(TextEditingController controller) {
-  return num.tryParse(controller.text.trim()) ?? 0;
-}
-
-String _formatMoney(num value) {
-  if (value == value.roundToDouble()) {
-    return value.toInt().toString();
-  }
-
-  return value.toStringAsFixed(2);
-}
-
-String _formatDateTime(DateTime? value) {
-  if (value == null) {
-    return '-';
-  }
-
+String _formatCheckTime(DateTime value) {
   final local = value.toLocal();
-  final year = local.year.toString().padLeft(4, '0');
-  final month = local.month.toString().padLeft(2, '0');
-  final day = local.day.toString().padLeft(2, '0');
   final hour = local.hour.toString().padLeft(2, '0');
   final minute = local.minute.toString().padLeft(2, '0');
-  return '$year-$month-$day $hour:$minute';
+  return '$hour:$minute';
+}
+
+T? _asyncValueData<T>(AsyncValue<T> value) {
+  return value.maybeWhen(data: (data) => data, orElse: () => null);
+}
+
+BarSessionCheckSummary? _findCheckById(
+  List<BarSessionCheckSummary> checks,
+  String checkId,
+) {
+  for (final check in checks) {
+    if (check.id == checkId) {
+      return check;
+    }
+  }
+
+  return null;
+}
+
+int? _checkNumberForId(List<BarSessionCheckSummary> checks, String checkId) {
+  for (var i = 0; i < checks.length; i++) {
+    if (checks[i].id == checkId) {
+      return i + 1;
+    }
+  }
+
+  return null;
+}
+
+String _readableError(Object error) {
+  final normalized = describeBackendActionError(
+    error,
+    fallback: 'Something went wrong.',
+  ).trim();
+  if (normalized.isEmpty) {
+    return 'Something went wrong.';
+  }
+
+  final lines = normalized
+      .split(RegExp(r'[\r\n]+'))
+      .map((line) => line.trim())
+      .where((line) => line.isNotEmpty && !line.startsWith('#'))
+      .toList(growable: false);
+  if (lines.isEmpty) {
+    return 'Something went wrong.';
+  }
+
+  return lines.first;
+}
+
+num _readAmount(TextEditingController controller) {
+  final normalized = controller.text.replaceAll(' ', '').trim();
+  return num.tryParse(normalized) ?? 0;
+}
+
+String _formatMoneyDisplay(num value) {
+  final isNegative = value < 0;
+  final absolute = value.abs();
+  final hasFraction = absolute != absolute.roundToDouble();
+  final parts =
+      (hasFraction ? absolute.toStringAsFixed(2) : absolute.toInt().toString())
+          .split('.');
+  final groupedWhole = parts.first.replaceAllMapped(
+    RegExp(r'\B(?=(\d{3})+(?!\d))'),
+    (_) => ' ',
+  );
+  final formatted = parts.length == 2
+      ? '$groupedWhole.${parts[1]}'
+      : groupedWhole;
+  return isNegative ? '-$formatted' : formatted;
 }

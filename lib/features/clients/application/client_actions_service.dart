@@ -7,6 +7,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/firebase_clients.dart';
+import '../../../core/utils/backend_action_error.dart';
 
 final clientActionsServiceProvider = Provider<ClientActionsService>((ref) {
   return ClientActionsService(
@@ -22,7 +23,7 @@ class CreateClientRequest {
     required this.firstName,
     required this.lastName,
     required this.phone,
-    required this.gender,
+    this.gender,
     this.birthDate,
     this.note,
     this.imageUrl,
@@ -31,7 +32,7 @@ class CreateClientRequest {
   final String firstName;
   final String lastName;
   final String phone;
-  final String gender;
+  final String? gender;
   final String? birthDate;
   final String? note;
   final String? imageUrl;
@@ -41,7 +42,7 @@ class CreateClientRequest {
       'firstName': firstName.trim(),
       'lastName': lastName.trim(),
       'phone': phone.trim(),
-      'gender': gender.trim().isEmpty ? 'male' : gender.trim(),
+      'gender': gender?.trim().isEmpty == true ? null : gender?.trim(),
       'birthDate': birthDate?.trim().isEmpty == true ? null : birthDate?.trim(),
       'note': note?.trim() ?? '',
       'image': imageUrl?.trim().isEmpty == true ? null : imageUrl?.trim(),
@@ -383,9 +384,9 @@ String? _fileExtension(String fileName) {
 }
 
 String _firebaseMessage(FirebaseFunctionsException error, String fallback) {
-  return error.details?.toString() ?? error.message ?? fallback;
+  return describeBackendActionError(error, fallback: fallback);
 }
 
 String _cleanError(Object error) {
-  return error.toString().replaceFirst('Exception: ', '');
+  return describeBackendActionError(error, fallback: 'Unexpected error');
 }

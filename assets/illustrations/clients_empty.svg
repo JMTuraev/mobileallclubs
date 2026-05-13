@@ -1,0 +1,26 @@
+<svg width="320" height="240" viewBox="0 0 320 240" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="320" height="240" fill="none"/>
+  <circle cx="98" cy="78" r="34" fill="#E8F1FF"/>
+  <circle cx="233" cy="60" r="20" fill="#F0F5FB"/>
+  <circle cx="252" cy="160" r="28" fill="#F7FAFE"/>
+  <rect x="59" y="50" width="202" height="132" rx="28" fill="url(#paint0_linear)" stroke="#D6E1EC" stroke-width="2"/>
+  <rect x="89" y="78" width="142" height="20" rx="10" fill="#EDF3FA"/>
+  <rect x="89" y="109" width="106" height="12" rx="6" fill="#DCE8FF"/>
+  <rect x="89" y="131" width="92" height="12" rx="6" fill="#E5EDF6"/>
+  <rect x="89" y="153" width="70" height="12" rx="6" fill="#E5EDF6"/>
+  <circle cx="89" cy="181" r="10" fill="#DCE8FF"/>
+  <circle cx="117" cy="181" r="10" fill="#E5EDF6"/>
+  <circle cx="145" cy="181" r="10" fill="#E5EDF6"/>
+  <circle cx="87" cy="88" r="18" fill="#DCE8FF"/>
+  <path d="M87 79C91.9706 79 96 75.1944 96 70.5C96 65.8056 91.9706 62 87 62C82.0294 62 78 65.8056 78 70.5C78 75.1944 82.0294 79 87 79Z" fill="#3B82F6"/>
+  <path d="M72 95.2C72 87.9098 77.9098 82 85.2 82H88.8C96.0902 82 102 87.9098 102 95.2V106H72V95.2Z" fill="#3B82F6"/>
+  <circle cx="235" cy="150" r="31" fill="white" stroke="#D6E1EC" stroke-width="2"/>
+  <circle cx="228" cy="145" r="15" stroke="#3B82F6" stroke-width="4"/>
+  <path d="M239 156L249 166" stroke="#3B82F6" stroke-width="4" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="paint0_linear" x1="75" y1="62" x2="233" y2="192" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F5F9FE"/>
+    </linearGradient>
+  </defs>
+</svg>

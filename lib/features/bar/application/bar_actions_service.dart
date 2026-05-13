@@ -6,6 +6,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/firebase_clients.dart';
+import '../../../core/utils/backend_action_error.dart';
 import '../../bootstrap/application/bootstrap_controller.dart';
 
 final barActionsServiceProvider = Provider<BarActionsService>((ref) {
@@ -208,29 +209,35 @@ class BarActionsService {
       }
     }
 
-    final response = await _functions.httpsCallable('createCheck').call(
-      <String, dynamic>{
-        'clientId':
-            normalizedClientId == null || normalizedClientId.isEmpty
-            ? null
-            : normalizedClientId,
-        'sessionId':
-            normalizedSessionId == null || normalizedSessionId.isEmpty
-            ? null
-            : normalizedSessionId,
-      },
-    );
+    try {
+      final response = await _functions.httpsCallable('createCheck').call(
+        <String, dynamic>{
+          'clientId':
+              normalizedClientId == null || normalizedClientId.isEmpty
+              ? null
+              : normalizedClientId,
+          'sessionId':
+              normalizedSessionId == null || normalizedSessionId.isEmpty
+              ? null
+              : normalizedSessionId,
+        },
+      );
 
-    final data = _asMap(response.data);
-    final nestedCheck = _asMap(data['check']);
-    final checkId =
-        data['checkId']?.toString() ?? nestedCheck['id']?.toString();
+      final data = _asMap(response.data);
+      final nestedCheck = _asMap(data['check']);
+      final checkId =
+          data['checkId']?.toString() ?? nestedCheck['id']?.toString();
 
-    if (checkId == null || checkId.trim().isEmpty) {
-      throw Exception('createCheck did not return a checkId.');
+      if (checkId == null || checkId.trim().isEmpty) {
+        throw Exception('createCheck did not return a checkId.');
+      }
+
+      return checkId.trim();
+    } on FirebaseFunctionsException catch (error) {
+      throw Exception(_firebaseMessage(error, 'Failed to create check'));
+    } catch (error) {
+      throw Exception(_cleanError(error));
     }
-
-    return checkId.trim();
   }
 
   Future<void> addItemToCheck({
@@ -238,11 +245,17 @@ class BarActionsService {
     required String productId,
     int qty = 1,
   }) async {
-    await _functions.httpsCallable('addItem').call(<String, dynamic>{
-      'checkId': checkId.trim(),
-      'productId': productId.trim(),
-      'qty': qty,
-    });
+    try {
+      await _functions.httpsCallable('addItem').call(<String, dynamic>{
+        'checkId': checkId.trim(),
+        'productId': productId.trim(),
+        'qty': qty,
+      });
+    } on FirebaseFunctionsException catch (error) {
+      throw Exception(_firebaseMessage(error, 'Failed to add item'));
+    } catch (error) {
+      throw Exception(_cleanError(error));
+    }
   }
 
   Future<void> removeItemFromCheck({
@@ -250,11 +263,17 @@ class BarActionsService {
     required String productId,
     int qty = 1,
   }) async {
-    await _functions.httpsCallable('removeItem').call(<String, dynamic>{
-      'checkId': checkId.trim(),
-      'productId': productId.trim(),
-      'qty': qty,
-    });
+    try {
+      await _functions.httpsCallable('removeItem').call(<String, dynamic>{
+        'checkId': checkId.trim(),
+        'productId': productId.trim(),
+        'qty': qty,
+      });
+    } on FirebaseFunctionsException catch (error) {
+      throw Exception(_firebaseMessage(error, 'Failed to remove item'));
+    } catch (error) {
+      throw Exception(_cleanError(error));
+    }
   }
 
   Future<void> payCheck({
@@ -275,12 +294,18 @@ class BarActionsService {
       throw Exception('At least one bar payment method is required.');
     }
 
-    await _functions.httpsCallable('payCheck').call(<String, dynamic>{
-      'checkId': checkId.trim(),
-      'payments': payments,
-      'idempotencyKey':
-          '${checkId.trim()}-${DateTime.now().millisecondsSinceEpoch}',
-    });
+    try {
+      await _functions.httpsCallable('payCheck').call(<String, dynamic>{
+        'checkId': checkId.trim(),
+        'payments': payments,
+        'idempotencyKey':
+            '${checkId.trim()}-${DateTime.now().millisecondsSinceEpoch}',
+      });
+    } on FirebaseFunctionsException catch (error) {
+      throw Exception(_firebaseMessage(error, 'Failed to pay check'));
+    } catch (error) {
+      throw Exception(_cleanError(error));
+    }
   }
 
   Future<void> voidCheck({required String checkId}) async {
@@ -567,9 +592,9 @@ String? _fileExtension(String fileName) {
 }
 
 String _firebaseMessage(FirebaseFunctionsException error, String fallback) {
-  return error.details?.toString() ?? error.message ?? fallback;
+  return describeBackendActionError(error, fallback: fallback);
 }
 
 String _cleanError(Object error) {
-  return error.toString().replaceFirst('Exception: ', '');
+  return describeBackendActionError(error, fallback: 'Unexpected error');
 }

@@ -61,14 +61,7 @@ class FirebaseBootstrap {
       return _lastResult;
     }
 
-    if (kIsWeb) {
-      _storeResult(
-        const FirebaseBootstrapResult.unsupportedPlatform(
-          'Firebase web configuration is not part of this mobile-only fix.',
-        ),
-      );
-      return _lastResult;
-    }
+
 
     try {
       await Firebase.initializeApp(

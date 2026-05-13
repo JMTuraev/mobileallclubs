@@ -8,10 +8,11 @@ import 'package:go_router/go_router.dart';
 import 'package:mobileallclubs/app/app.dart';
 import 'package:mobileallclubs/core/routing/app_router.dart';
 import 'package:mobileallclubs/core/theme/app_theme.dart';
+import 'package:mobileallclubs/core/widgets/app_control_widgets.dart';
 import 'package:mobileallclubs/core/widgets/app_shell_scaffold.dart';
 import 'package:mobileallclubs/features/bootstrap/application/bootstrap_controller.dart';
 import 'package:mobileallclubs/features/bootstrap/application/bootstrap_state.dart';
-import 'package:mobileallclubs/features/auth/presentation/authenticated_shell_screen.dart';
+import 'package:mobileallclubs/features/auth/presentation/profile_screen.dart';
 import 'package:mobileallclubs/features/bar/application/bar_actions_service.dart';
 import 'package:mobileallclubs/features/bar/application/bar_providers.dart';
 import 'package:mobileallclubs/features/bar/domain/bar_category_summary.dart';
@@ -37,12 +38,14 @@ import 'package:mobileallclubs/features/dashboard/domain/owner_analytics_models.
 import 'package:mobileallclubs/features/dashboard/presentation/dashboard_screen.dart';
 import 'package:mobileallclubs/features/finance/application/transaction_providers.dart';
 import 'package:mobileallclubs/features/finance/domain/gym_transaction_summary.dart';
+import 'package:mobileallclubs/features/finance/presentation/finance_screen.dart';
 import 'package:mobileallclubs/features/invites/application/invite_providers.dart';
 import 'package:mobileallclubs/features/invites/domain/gym_invite_summary.dart';
 import 'package:mobileallclubs/features/invites/presentation/accept_invite_screen.dart';
 import 'package:mobileallclubs/features/invites/presentation/invites_screen.dart';
 import 'package:mobileallclubs/features/packages/application/package_providers.dart';
 import 'package:mobileallclubs/features/packages/domain/gym_package_summary.dart';
+import 'package:mobileallclubs/features/packages/presentation/create_package_screen.dart';
 import 'package:mobileallclubs/features/packages/presentation/packages_screen.dart';
 import 'package:mobileallclubs/features/sessions/application/sessions_providers.dart';
 import 'package:mobileallclubs/features/sessions/domain/gym_session_summary.dart';
@@ -151,6 +154,16 @@ const _onboardingSession = ResolvedAuthSession(
   ),
 );
 
+final _fixtureNow = DateTime.now();
+
+DateTime _todayAt(int hour, int minute) => DateTime(
+  _fixtureNow.year,
+  _fixtureNow.month,
+  _fixtureNow.day,
+  hour,
+  minute,
+);
+
 const _sampleClients = [
   GymClientSummary(
     id: 'client-001',
@@ -248,8 +261,8 @@ final _sampleGymSessions = [
     locker: '24',
     status: 'active',
     staffName: 'Coach Bot',
-    createdAt: DateTime(2026, 4, 5, 10, 0),
-    startedAt: DateTime(2026, 4, 5, 10, 5),
+    createdAt: _todayAt(10, 0),
+    startedAt: _todayAt(10, 5),
   ),
   GymSessionSummary(
     id: 'gym-session-002',
@@ -259,9 +272,9 @@ final _sampleGymSessions = [
     locker: '17',
     status: 'completed',
     staffName: 'Front Desk',
-    createdAt: DateTime(2026, 4, 4, 9, 0),
-    startedAt: DateTime(2026, 4, 4, 9, 5),
-    endedAt: DateTime(2026, 4, 4, 10, 2),
+    createdAt: _todayAt(9, 0),
+    startedAt: _todayAt(9, 5),
+    endedAt: _todayAt(10, 2),
   ),
 ];
 
@@ -576,6 +589,23 @@ Widget _buildScreenHarness({required List overrides, required Widget child}) {
   );
 }
 
+Future<void> _pumpMobileGoldenHarness(
+  WidgetTester tester, {
+  required List overrides,
+  required Widget child,
+}) async {
+  addTearDown(() {
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  });
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = const Size(430, 932);
+  await tester.pumpWidget(
+    _buildScreenHarness(overrides: overrides, child: child),
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
   testWidgets(
     'shows the bootstrap loading screen while session state resolves',
@@ -746,15 +776,47 @@ void main() {
             (ref) => const BootstrapState.authenticated(_verifiedSession),
           ),
         ],
-        child: const AuthenticatedShellScreen(),
+        child: const ProfileScreen(),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(AuthenticatedShellScreen), findsOneWidget);
-    expect(find.text('Profile'), findsOneWidget);
+    expect(find.byType(ProfileScreen), findsOneWidget);
+    expect(find.text('AllClubs Gym'), findsOneWidget);
+    expect(find.text('Settings'), findsWidgets);
     expect(find.text('owner@allclubs.test'), findsOneWidget);
   });
+
+  testWidgets(
+    'opens the clients module by default when a session is restored',
+    (WidgetTester tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            bootstrapControllerProvider.overrideWith(
+              (ref) => const BootstrapState.authenticated(_verifiedSession),
+            ),
+            currentGymClientsStreamProvider.overrideWith(
+              (ref) => Stream.value(_sampleClients),
+            ),
+            currentGymSubscriptionsProvider.overrideWith(
+              (ref) => Stream.value(_sampleSubscriptions),
+            ),
+            currentGymSessionsProvider.overrideWith(
+              (ref) => Stream.value(_sampleSessions),
+            ),
+          ],
+          child: const AllClubsMobileApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AppShellScaffold), findsOneWidget);
+      expect(find.text('Search by phone number'), findsOneWidget);
+      expect(find.text('All Clients'), findsOneWidget);
+      expect(find.text('Ali Valiyev'), findsOneWidget);
+    },
+  );
 
   testWidgets('opens the real clients module from the authenticated shell', (
     WidgetTester tester,
@@ -775,7 +837,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(ClientsScreen), findsOneWidget);
-    expect(find.text('AllClubs Gym'), findsOneWidget);
+    expect(find.text('Search by phone number'), findsOneWidget);
+    expect(find.text('All Clients'), findsOneWidget);
   });
 
   testWidgets('opens the real sessions module from the authenticated shell', (
@@ -797,7 +860,38 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(SessionsScreen), findsOneWidget);
-    expect(find.text('AllClubs Gym'), findsOneWidget);
+    expect(find.widgetWithText(AppGlassControlButton, 'Today'), findsOneWidget);
+    expect(find.text('Online'), findsWidgets);
+  });
+
+  testWidgets('defaults sessions screen to online filter first', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      _buildScreenHarness(
+        overrides: [
+          bootstrapControllerProvider.overrideWith(
+            (ref) => const BootstrapState.authenticated(_verifiedSession),
+          ),
+          currentGymClientsStreamProvider.overrideWith(
+            (ref) => Stream.value(_sampleClients),
+          ),
+          currentGymSessionsStreamProvider.overrideWith(
+            (ref) => Stream.value(_sampleGymSessions),
+          ),
+        ],
+        child: const SessionsScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ali Valiyev'), findsOneWidget);
+    expect(find.text('Laylo Karimova'), findsNothing);
+
+    await tester.tap(find.text('All'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Laylo Karimova'), findsOneWidget);
   });
 
   testWidgets('renders filtered client sessions inside the shared shell body', (
@@ -823,10 +917,10 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('Client sessions'), findsOneWidget);
-    expect(find.text('Back to client'), findsOneWidget);
-    expect(find.text('Client filter'), findsOneWidget);
-    expect(find.text('Ali Valiyev'), findsWidgets);
-    expect(find.text('1 sessions'), findsOneWidget);
+    expect(find.text('Back'), findsOneWidget);
+    expect(find.text('Client filter'), findsNothing);
+    expect(find.text('Ali Valiyev'), findsOneWidget);
+    expect(find.widgetWithText(AppGlassControlButton, 'Today'), findsOneWidget);
   });
 
   testWidgets('renders sold package rows with edit and replace actions', (
@@ -854,14 +948,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Templates'), findsOneWidget);
-    expect(find.text('Sold packages'), findsOneWidget);
+    expect(find.text('Subscriptions'), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(ChoiceChip, 'Sold packages'));
+    await tester.tap(find.text('Subscriptions'));
     await tester.pumpAndSettle();
 
     expect(find.text('Ali Valiyev', skipOffstage: false), findsOneWidget);
     expect(find.text('Premium 12', skipOffstage: false), findsOneWidget);
-    expect(find.text('Edit', skipOffstage: false), findsOneWidget);
+    expect(find.text('Edit start', skipOffstage: false), findsOneWidget);
     expect(find.text('Replace', skipOffstage: false), findsOneWidget);
   });
 
@@ -899,13 +993,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AppShellScaffold), findsOneWidget);
-    expect(find.text('Clients'), findsOneWidget);
-    expect(find.text('Sessions'), findsOneWidget);
-    expect(find.text('Finance'), findsOneWidget);
-    expect(find.text('Packages'), findsOneWidget);
+    expect(find.text('Mijozlar'), findsWidgets);
+    expect(find.text('Seanslar'), findsOneWidget);
+    expect(find.text('Moliya'), findsOneWidget);
+    expect(find.text('Paketlar'), findsOneWidget);
     expect(find.byTooltip('POS'), findsOneWidget);
-    expect(find.byTooltip('Stats'), findsOneWidget);
-    expect(find.byTooltip('Profile'), findsOneWidget);
+    expect(find.byTooltip('Stat'), findsOneWidget);
+    expect(find.byTooltip('Profil'), findsOneWidget);
 
     await tester.tap(find.byTooltip('POS'));
     await tester.pumpAndSettle();
@@ -925,7 +1019,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Stats'));
+    await tester.tap(find.byTooltip('Stat'));
     await tester.pumpAndSettle();
     expect(find.byType(DashboardScreen), findsOneWidget);
     expect(find.text('Today gym stats'), findsOneWidget);
@@ -936,30 +1030,31 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
 
-    await tester.tap(find.text('Clients'));
+    await tester.tap(find.text('Mijozlar'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
     expect(find.byType(ClientsScreen), findsOneWidget);
 
-    await tester.tap(find.text('Sessions'));
+    await tester.tap(find.text('Seanslar'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
     expect(find.byType(SessionsScreen), findsOneWidget);
 
-    await tester.tap(find.text('Finance'));
+    await tester.tap(find.text('Moliya'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
-    expect(find.text('Finance'), findsWidgets);
+    expect(find.byType(FinanceScreen), findsOneWidget);
 
-    await tester.tap(find.text('Packages'));
+    await tester.tap(find.text('Paketlar'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
-    expect(find.text('Packages'), findsWidgets);
+    expect(find.byType(PackagesScreen), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Profile'));
+    await tester.tap(find.byTooltip('Profil'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
-    expect(find.byType(AuthenticatedShellScreen), findsOneWidget);
+    expect(find.byType(ProfileScreen), findsOneWidget);
+    expect(find.text('Mijozlar'), findsWidgets);
   });
 
   testWidgets('shows current gym daily stats for staff sessions', (
@@ -1020,21 +1115,21 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Clients'), findsOneWidget);
-    expect(find.text('Sessions'), findsOneWidget);
-    expect(find.text('Finance'), findsOneWidget);
-    expect(find.text('Packages'), findsOneWidget);
+    expect(find.text('Mijozlar'), findsWidgets);
+    expect(find.text('Seanslar'), findsOneWidget);
+    expect(find.text('Moliya'), findsOneWidget);
+    expect(find.text('Paketlar'), findsOneWidget);
 
     tester.view.viewInsets = const FakeViewPadding(bottom: 320);
     await tester.pumpAndSettle();
 
-    expect(find.text('Clients'), findsNothing);
-    expect(find.text('Sessions'), findsNothing);
-    expect(find.text('Finance'), findsNothing);
-    expect(find.text('Packages'), findsNothing);
+    expect(find.text('Mijozlar'), findsNothing);
+    expect(find.text('Seanslar'), findsNothing);
+    expect(find.text('Moliya'), findsNothing);
+    expect(find.text('Paketlar'), findsNothing);
     expect(find.byTooltip('POS'), findsOneWidget);
-    expect(find.byTooltip('Stats'), findsOneWidget);
-    expect(find.byTooltip('Profile'), findsOneWidget);
+    expect(find.byTooltip('Stat'), findsOneWidget);
+    expect(find.byTooltip('Profil'), findsOneWidget);
   });
 
   testWidgets('renders the owner-only bar admin categories content', (
@@ -1176,18 +1271,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Current session'), findsOneWidget);
     expect(find.text('Ali Valiyev'), findsOneWidget);
-    expect(find.text('Draft check bar-check-1'), findsOneWidget);
     expect(find.text('Categories'), findsOneWidget);
     expect(find.text('Coffee'), findsWidgets);
-    expect(find.text('Products'), findsOneWidget);
     expect(find.text('Americano'), findsWidgets);
-    expect(find.text('Current check'), findsOneWidget);
-    expect(find.text('36000 so\'m'), findsWidgets);
-    expect(find.text('Check history'), findsOneWidget);
-    expect(find.text('Refund paid check'), findsOneWidget);
-    expect(find.text('Check debt'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.shopping_basket_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cart'), findsOneWidget);
+    expect(find.text('Active'), findsOneWidget);
+    expect(find.text('History'), findsOneWidget);
+    expect(find.text('Check #1'), findsWidgets);
+    expect(find.text('36 000 UZS'), findsWidgets);
+    expect(find.text('Payment'), findsWidgets);
   });
 
   testWidgets('renders guest bar POS without debt or session history', (
@@ -1216,11 +1313,8 @@ void main() {
     await tester.pump();
     await tester.pumpAndSettle();
 
-    expect(find.text('Guest POS'), findsWidgets);
-    expect(
-      find.textContaining('createCheck with null clientId and null sessionId'),
-      findsOneWidget,
-    );
+    expect(find.text('Guest'), findsWidgets);
+    expect(find.text('Categories'), findsOneWidget);
     expect(find.text('Client debt'), findsNothing);
     expect(find.text('Check history'), findsNothing);
     expect(find.text('Americano'), findsWidgets);
@@ -1393,15 +1487,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('New client'), findsOneWidget);
-    await tester.tap(find.text('New client'));
+    expect(find.byIcon(Icons.person_add_alt_1_rounded), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.person_add_alt_1_rounded));
     await tester.pumpAndSettle();
 
     expect(find.text('Create client'), findsWidgets);
-    expect(find.text('First name'), findsOneWidget);
-    expect(find.text('Last name'), findsOneWidget);
-    expect(find.text('Phone'), findsOneWidget);
-    expect(find.text('Gender'), findsOneWidget);
+    expect(find.textContaining('First name'), findsOneWidget);
+    expect(find.textContaining('Last name'), findsOneWidget);
+    expect(find.textContaining('Phone number'), findsOneWidget);
+    expect(find.text('Male'), findsOneWidget);
+    expect(find.text('Female'), findsOneWidget);
   });
 
   testWidgets(
@@ -1454,7 +1549,7 @@ void main() {
       await tester.scrollUntilVisible(find.text('Finance summary'), 200);
       await tester.pumpAndSettle();
       expect(find.text('Finance summary'), findsOneWidget);
-      expect(find.text('900000'), findsWidgets);
+      expect(find.text('900 000'), findsWidgets);
       expect(find.text('cash'), findsOneWidget);
       expect(find.text('card'), findsOneWidget);
       await tester.scrollUntilVisible(find.text('Session summary'), 200);
@@ -1464,6 +1559,19 @@ void main() {
       expect(find.text('Locker 24'), findsOneWidget);
     },
   );
+
+  test('builds the blocked session-end message for held POS receipts', () {
+    final message = buildSessionEndBlockedMessage('Ali Valiyev', const [
+      BarSessionCheckSummary(
+        id: 'held-check-1',
+        status: 'held',
+        totalAmount: 36000,
+      ),
+    ]);
+
+    expect(message, contains('bar\'da yopilmagan chek bor'));
+    expect(message, contains('Avval payment qiling'));
+  });
 
   testWidgets('shows exact client insights callable data', (
     WidgetTester tester,
@@ -1509,7 +1617,7 @@ void main() {
     expect(find.text('Go to sign in'), findsOneWidget);
   });
 
-  testWidgets('opens developer firebase diagnostics in debug mode', (
+  testWidgets('hides developer firebase diagnostics shortcut by default', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -1524,13 +1632,327 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(
-      find.text('Open Developer Firebase Diagnostics'),
+    expect(find.text('Open Developer Firebase Diagnostics'), findsNothing);
+    expect(find.text('Developer Firebase Diagnostics'), findsNothing);
+  });
+
+  testWidgets('captures clients screen shared controls', (
+    WidgetTester tester,
+  ) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymClientsStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleClients),
+        ),
+      ],
+      child: const ClientsScreen(),
     );
-    await tester.tap(find.text('Open Developer Firebase Diagnostics'));
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/clients_shared_controls.png'),
+    );
+  });
+
+  testWidgets('captures finance transactions and calendar controls', (
+    WidgetTester tester,
+  ) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymClientsStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleClients),
+        ),
+        currentGymTransactionsProvider.overrideWith(
+          (ref) => Stream.value(_sampleTransactions),
+        ),
+        currentGymSubscriptionsProvider.overrideWith(
+          (ref) => Stream.value(_sampleSubscriptions),
+        ),
+      ],
+      child: const FinanceScreen(),
+    );
+
+    await tester.tap(find.text('Transactions'));
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/finance_transactions_shared_controls.png'),
+    );
+
+    await tester.tap(find.widgetWithText(AppGlassControlButton, 'Today'));
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/finance_calendar_shared_controls.png'),
+    );
+  });
+
+  testWidgets('captures sessions list and calendar controls', (
+    WidgetTester tester,
+  ) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymClientsStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleClients),
+        ),
+        currentGymSessionsStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleGymSessions),
+        ),
+      ],
+      child: const SessionsScreen(),
+    );
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/sessions_shared_avatar.png'),
+    );
+
+    await tester.tap(find.byType(AppGlassControlButton).first);
+    await tester.pumpAndSettle();
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/sessions_calendar_shared_controls.png'),
+    );
+  });
+
+  testWidgets('captures packages screen', (WidgetTester tester) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymPackagesProvider.overrideWith(
+          (ref) => Stream.value(_samplePackages),
+        ),
+        currentGymSubscriptionsProvider.overrideWith(
+          (ref) => Stream.value(_sampleSubscriptions),
+        ),
+        currentGymClientsStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleClients),
+        ),
+      ],
+      child: const PackagesScreen(),
+    );
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/packages_screen.png'),
+    );
+  });
+
+  testWidgets('captures create package screen', (WidgetTester tester) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+      ],
+      child: const CreatePackageScreen(),
+    );
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/create_package_screen.png'),
+    );
+  });
+
+  testWidgets('captures profile drawer menu', (WidgetTester tester) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymStaffStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleStaff),
+        ),
+      ],
+      child: const ProfileScreen(),
+    );
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/profile_home_screen.png'),
+    );
+  });
+
+  testWidgets('captures profile staffs tab', (WidgetTester tester) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymStaffStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleStaff),
+        ),
+      ],
+      child: const ProfileScreen(),
+    );
+
+    await tester.tap(find.text('Staffs'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Developer Firebase Diagnostics'), findsOneWidget);
-    expect(find.text('Developer-only runtime verification'), findsOneWidget);
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/profile_staffs_page.png'),
+    );
+  });
+
+  testWidgets('opens staff card overflow menu from profile staffs page', (
+    WidgetTester tester,
+  ) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymStaffStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleStaff),
+        ),
+      ],
+      child: const ProfileScreen(),
+    );
+
+    await tester.tap(find.text('Staffs'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('More').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Edit'), findsOneWidget);
+    expect(find.text('Delete'), findsOneWidget);
+  });
+
+  testWidgets('captures profile settings page', (WidgetTester tester) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymStaffStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleStaff),
+        ),
+      ],
+      child: const ProfileScreen(),
+    );
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/profile_settings_page.png'),
+    );
+  });
+
+  testWidgets('captures profile subscription page', (
+    WidgetTester tester,
+  ) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymStaffStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleStaff),
+        ),
+      ],
+      child: const ProfileScreen(),
+    );
+
+    await tester.tap(find.text('Subscription'));
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/profile_subscription_page.png'),
+    );
+  });
+
+  testWidgets('captures profile about page', (WidgetTester tester) async {
+    await _pumpMobileGoldenHarness(
+      tester,
+      overrides: [
+        bootstrapControllerProvider.overrideWith(
+          (ref) => const BootstrapState.authenticated(_verifiedSession),
+        ),
+        currentGymStaffStreamProvider.overrideWith(
+          (ref) => Stream.value(_sampleStaff),
+        ),
+      ],
+      child: const ProfileScreen(),
+    );
+
+    await tester.tap(find.text('Biz haqimizda'));
+    await tester.pumpAndSettle();
+
+    await expectLater(
+      find.byType(MaterialApp),
+      matchesGoldenFile('goldens/profile_about_page.png'),
+    );
+  });
+
+  testWidgets('shows profile settings title in the shared shell header', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          bootstrapControllerProvider.overrideWith(
+            (ref) => const BootstrapState.authenticated(_verifiedSession),
+          ),
+          currentGymClientsStreamProvider.overrideWith(
+            (ref) => Stream.value(_sampleClients),
+          ),
+          currentGymSubscriptionsProvider.overrideWith(
+            (ref) => Stream.value(_sampleSubscriptions),
+          ),
+          currentGymSessionsProvider.overrideWith(
+            (ref) => Stream.value(_sampleSessions),
+          ),
+          currentGymStaffStreamProvider.overrideWith(
+            (ref) => Stream.value(_sampleStaff),
+          ),
+        ],
+        child: const AllClubsMobileApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Profil'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+
+    final appBarFinder = find.byType(AppBar);
+    expect(
+      find.descendant(of: appBarFinder, matching: find.text('Settings')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: appBarFinder,
+        matching: find.byIcon(Icons.arrow_back_ios_new_rounded),
+      ),
+      findsOneWidget,
+    );
   });
 }

@@ -1,16 +1,22 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/developer_tools.dart';
+import '../../../core/localization/app_currency.dart';
 import '../../../core/routing/app_router.dart';
 import '../../../core/services/firebase_clients.dart';
+import '../../../core/utils/phone_launcher.dart';
 import '../../../core/widgets/app_backdrop.dart';
+import '../../../core/widgets/app_route_back_scope.dart';
+import '../../bar/application/bar_providers.dart';
+import '../../bar/domain/bar_session_check_summary.dart';
 import '../../finance/application/payment_actions_service.dart';
 import '../../finance/application/transaction_providers.dart';
 import '../../finance/domain/client_finance_resolution.dart';
 import '../../finance/domain/gym_transaction_summary.dart';
 import '../../packages/application/subscription_sale_service.dart';
+import '../../packages/presentation/activate_package_screen.dart';
 import '../../../models/auth_bootstrap_models.dart';
 import '../../bootstrap/application/bootstrap_controller.dart';
 import '../application/client_actions_service.dart';
@@ -94,10 +100,8 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
         return;
       }
 
-      setState(() {
-        _actionStatusMessage = '${client.fullName} session started.';
-        _actionStatusIsError = false;
-      });
+      context.go(AppRoutes.clientsWithHighlight(client.id));
+      return;
     } catch (error) {
       if (!mounted) {
         return;
@@ -114,6 +118,32 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
     }
   }
 
+  Future<void> _callClientPhone(String? phone) async {
+    try {
+      final result = await confirmAndLaunchPhoneDialer(context, phone);
+      if (!mounted || result == PhoneLaunchResult.launched) {
+        return;
+      }
+
+      if (result == PhoneLaunchResult.unavailable ||
+          result == PhoneLaunchResult.invalid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This device cannot start a phone call.'),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Phone call could not be started.')),
+      );
+    }
+  }
+
   Future<void> _endSession({
     required String sessionId,
     required String clientName,
@@ -122,33 +152,46 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
       return;
     }
 
-    final shouldEnd = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('End session'),
-        content: Text(
-          'End the active session for $clientName? This follows the production endSession callable and may consume one remaining visit.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('End session'),
-          ),
-        ],
-      ),
-    );
-
-    if (shouldEnd != true || !mounted) {
-      return;
-    }
-
     setState(() => _isActionBusy = true);
 
     try {
+      final checks = await ref.read(barSessionChecksProvider(sessionId).future);
+      final blockedMessage = buildSessionEndBlockedMessage(clientName, checks);
+      if (!mounted) {
+        return;
+      }
+      if (blockedMessage.trim().isNotEmpty) {
+        setState(() {
+          _actionStatusMessage = blockedMessage;
+          _actionStatusIsError = true;
+        });
+        return;
+      }
+
+      final shouldEnd = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('End session'),
+          content: Text(
+            'End the active session for $clientName? This follows the production endSession callable and may consume one remaining visit.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('End session'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldEnd != true || !mounted) {
+        return;
+      }
+
       final result = await ref
           .read(clientActionsServiceProvider)
           .endSession(sessionId: sessionId);
@@ -635,6 +678,7 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(appCurrencyProvider);
     final bootstrapState = ref.watch(bootstrapControllerProvider);
     final session = bootstrapState.session;
     final canAccessClient = _canAccessClient(session, widget.clientId);
@@ -667,7 +711,8 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          onPressed: () => context.go(AppRoutes.clients),
+          onPressed: () =>
+              handleAppRouteBack(context, fallbackLocation: AppRoutes.clients),
           icon: const Icon(Icons.arrow_back_rounded),
           tooltip: 'Back to clients',
         ),
@@ -706,6 +751,9 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                               _ClientHeroCard(
                                 client: client,
                                 gymName: session?.gym?.name,
+                                onPhoneTap: client.phone == null
+                                    ? null
+                                    : () => _callClientPhone(client.phone),
                               ),
                               const SizedBox(height: 12),
                               _ClientActionCard(
@@ -717,9 +765,25 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                                 isCardEditorVisible: _isCardEditorVisible,
                                 statusMessage: _actionStatusMessage,
                                 statusIsError: _actionStatusIsError,
-                                onActivatePackage: () => context.go(
-                                  AppRoutes.activatePackage(widget.clientId),
-                                ),
+                                onActivatePackage: () {
+                                  if (activeSubscription != null) {
+                                    context.push(
+                                      AppRoutes.packageSubscriptionAction,
+                                      extra: ActivatePackageRouteArgs(
+                                        clientId: widget.clientId,
+                                        clientName: client.fullName,
+                                        clientPhone: client.phone,
+                                        editSubscription: activeSubscription,
+                                        popOnSuccess: true,
+                                      ),
+                                    );
+                                    return;
+                                  }
+
+                                  context.go(
+                                    AppRoutes.activatePackage(widget.clientId),
+                                  );
+                                },
                                 onToggleCardEditor: session?.gymId == null
                                     ? null
                                     : () => _toggleCardEditor(client),
@@ -758,7 +822,12 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                                     : null,
                               ),
                               const SizedBox(height: 12),
-                              _ClientPersonalInfoCard(client: client),
+                              _ClientPersonalInfoCard(
+                                client: client,
+                                onPhoneTap: client.phone == null
+                                    ? null
+                                    : () => _callClientPhone(client.phone),
+                              ),
                               const SizedBox(height: 12),
                               ClientInsightsCard(clientId: widget.clientId),
                               const SizedBox(height: 12),
@@ -805,11 +874,11 @@ class _ClientDetailScreenState extends ConsumerState<ClientDetailScreen> {
                                 icon: const Icon(Icons.event_note_rounded),
                                 label: const Text('Open client sessions'),
                               ),
-                              if (kDebugMode) ...[
+                              if (showDeveloperDiagnosticsShortcut) ...[
                                 const SizedBox(height: 12),
                                 OutlinedButton.icon(
                                   onPressed: () =>
-                                      context.go(AppRoutes.firebaseDiagnostics),
+                                      openDeveloperDiagnostics(context),
                                   icon: const Icon(
                                     Icons.developer_mode_rounded,
                                   ),
@@ -846,10 +915,11 @@ bool _canAccessClient(ResolvedAuthSession? session, String clientId) {
 }
 
 class _ClientHeroCard extends StatelessWidget {
-  const _ClientHeroCard({required this.client, this.gymName});
+  const _ClientHeroCard({required this.client, this.gymName, this.onPhoneTap});
 
   final GymClientDetail client;
   final String? gymName;
+  final VoidCallback? onPhoneTap;
 
   @override
   Widget build(BuildContext context) {
@@ -861,21 +931,28 @@ class _ClientHeroCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CircleAvatar(
-              radius: 30,
-              backgroundColor: theme.colorScheme.primaryContainer,
-              backgroundImage: client.imageUrl != null
-                  ? NetworkImage(client.imageUrl!)
-                  : null,
-              child: client.imageUrl == null
-                  ? Text(
-                      client.initials,
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        color: theme.colorScheme.onPrimaryContainer,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    )
-                  : null,
+            Builder(
+              builder: (context) {
+                final hasImage =
+                    client.imageUrl != null &&
+                    client.imageUrl!.trim().isNotEmpty;
+                return CircleAvatar(
+                  radius: 30,
+                  backgroundColor: theme.colorScheme.primaryContainer,
+                  backgroundImage: hasImage
+                      ? NetworkImage(client.imageUrl!.trim())
+                      : null,
+                  child: !hasImage
+                      ? Text(
+                          client.initials,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            color: theme.colorScheme.onPrimaryContainer,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        )
+                      : null,
+                );
+              },
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -904,6 +981,7 @@ class _ClientHeroCard extends StatelessWidget {
                         _InfoChip(
                           icon: Icons.phone_outlined,
                           label: client.phone!,
+                          onTap: onPhoneTap,
                         ),
                     ],
                   ),
@@ -918,9 +996,10 @@ class _ClientHeroCard extends StatelessWidget {
 }
 
 class _ClientPersonalInfoCard extends StatelessWidget {
-  const _ClientPersonalInfoCard({required this.client});
+  const _ClientPersonalInfoCard({required this.client, this.onPhoneTap});
 
   final GymClientDetail client;
+  final VoidCallback? onPhoneTap;
 
   @override
   Widget build(BuildContext context) {
@@ -935,7 +1014,12 @@ class _ClientPersonalInfoCard extends StatelessWidget {
             Text('Profile', style: theme.textTheme.titleLarge),
             const SizedBox(height: 16),
             _DetailRow(label: 'Full name', value: client.fullName),
-            _DetailRow(label: 'Phone', value: client.phone ?? 'Unavailable'),
+            _DetailRow(
+              label: 'Phone',
+              value: client.phone ?? 'Unavailable',
+              detail: client.phone == null ? null : 'Tap the number to call.',
+              onTap: onPhoneTap,
+            ),
             _DetailRow(label: 'Email', value: client.email ?? 'Unavailable'),
             _DetailRow(label: 'Card ID', value: client.cardId ?? 'Unavailable'),
             _DetailRow(label: 'Gender', value: client.gender ?? 'Unavailable'),
@@ -1742,11 +1826,17 @@ class _SectionEmptyCard extends StatelessWidget {
 }
 
 class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.label, required this.value, this.detail});
+  const _DetailRow({
+    required this.label,
+    required this.value,
+    this.detail,
+    this.onTap,
+  });
 
   final String label;
   final String value;
   final String? detail;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -1759,7 +1849,41 @@ class _DetailRow extends StatelessWidget {
         children: [
           Text(label, style: theme.textTheme.labelLarge),
           const SizedBox(height: 4),
-          Text(value, style: theme.textTheme.bodyLarge),
+          if (onTap == null)
+            Text(value, style: theme.textTheme.bodyLarge)
+          else
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          value,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            color: theme.colorScheme.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Icon(
+                        Icons.call_outlined,
+                        size: 18,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           if (detail != null) ...[
             const SizedBox(height: 4),
             Text(detail!, style: theme.textTheme.bodyMedium),
@@ -1771,16 +1895,17 @@ class _DetailRow extends StatelessWidget {
 }
 
 class _InfoChip extends StatelessWidget {
-  const _InfoChip({required this.icon, required this.label});
+  const _InfoChip({required this.icon, required this.label, this.onTap});
 
   final IconData icon;
   final String label;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Container(
+    final content = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
@@ -1792,7 +1917,28 @@ class _InfoChip extends StatelessWidget {
           Icon(icon, size: 16, color: theme.colorScheme.primary),
           const SizedBox(width: 6),
           Flexible(child: Text(label, style: theme.textTheme.labelLarge)),
+          if (onTap != null) ...[
+            const SizedBox(width: 6),
+            Icon(
+              Icons.call_outlined,
+              size: 14,
+              color: theme.colorScheme.primary,
+            ),
+          ],
         ],
+      ),
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: content,
       ),
     );
   }
@@ -1927,10 +2073,7 @@ String _formatMoney(num? value) {
     return 'Unavailable';
   }
 
-  final normalized = value % 1 == 0
-      ? value.toStringAsFixed(0)
-      : value.toString();
-  return normalized;
+  return formatAppMoney(value);
 }
 
 String _formatVisits(ClientSubscriptionSummary subscription) {

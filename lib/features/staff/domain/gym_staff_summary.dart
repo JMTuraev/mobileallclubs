@@ -71,7 +71,7 @@ class GymStaffSummary {
 
   String get displayPhone {
     if (phone != null && phone!.isNotEmpty) {
-      return phone!;
+      return _formatPhone(phone!);
     }
 
     return '-';
@@ -108,6 +108,28 @@ bool? _asBool(dynamic value) {
   }
 
   return null;
+}
+
+String _formatPhone(String phone) {
+  final trimmed = phone.trim();
+  final digits = trimmed.replaceAll(RegExp(r'\D'), '');
+  if (digits.length < 9) {
+    return trimmed;
+  }
+
+  final localDigits = digits.substring(digits.length - 9);
+  final localFormatted =
+      '${localDigits.substring(0, 2)} '
+      '${localDigits.substring(2, 5)} '
+      '${localDigits.substring(5, 7)} '
+      '${localDigits.substring(7, 9)}';
+
+  final countryDigits = digits.substring(0, digits.length - 9);
+  if (countryDigits.isEmpty) {
+    return localFormatted;
+  }
+
+  return '+$countryDigits $localFormatted';
 }
 
 int? _asEpochMillis(dynamic value) {

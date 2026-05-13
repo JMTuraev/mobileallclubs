@@ -1,36 +1,39 @@
 import 'package:flutter/material.dart';
 
 abstract final class AppColors {
-  static const ink = Color(0xFFF4F8FD);
-  static const mutedInk = Color(0xFF90A2B8);
-  static const canvas = Color(0xFF0E1621);
-  static const canvasStrong = Color(0xFF101720);
-  static const panel = Color(0xFF17222F);
-  static const panelRaised = Color(0xFF1E2C3B);
-  static const border = Color(0xFF2C3A4C);
-  static const primary = Color(0xFFF5F8FE);
-  static const secondary = Color(0xFFDDE5F0);
-  static const accent = Color(0xFFFFD84A);
-  static const danger = Color(0xFFFF707E);
-  static const success = Color(0xFF59D690);
+  static const ink = Color(0xFF16324F);
+  static const mutedInk = Color(0xFF71839A);
+  static const canvas = Color(0xFFF7FAFE);
+  static const canvasStrong = Color(0xFF16324F);
+  static const panel = Color(0xFFFFFFFF);
+  static const panelRaised = Color(0xFFF0F5FB);
+  static const border = Color(0xFFD6E1EC);
+  static const primary = Color(0xFF3B82F6);
+  static const secondary = Color(0xFF94A7BF);
+  static const accent = Color(0xFF6D8CFF);
+  static const danger = Color(0xFFD85F76);
+  static const success = Color(0xFF3DBB7A);
 }
 
 class AppTheme {
-  static ThemeData dark() {
+  static ThemeData light() {
     final scheme =
         ColorScheme.fromSeed(
           seedColor: AppColors.primary,
-          brightness: Brightness.dark,
+          brightness: Brightness.light,
         ).copyWith(
           primary: AppColors.primary,
           secondary: AppColors.secondary,
           surface: AppColors.panel,
+          onPrimary: Colors.white,
+          onSecondary: AppColors.ink,
           onSurface: AppColors.ink,
+          surfaceTint: Colors.transparent,
           outline: AppColors.border,
           error: AppColors.danger,
-          primaryContainer: const Color(0xFF324150),
+          primaryContainer: const Color(0xFFDCE8FF),
           onPrimaryContainer: AppColors.ink,
-          secondaryContainer: const Color(0xFF273443),
+          secondaryContainer: const Color(0xFFE8EFF7),
           onSecondaryContainer: AppColors.ink,
           surfaceContainerHighest: AppColors.panelRaised,
           onSurfaceVariant: AppColors.mutedInk,
@@ -39,7 +42,7 @@ class AppTheme {
     final base = ThemeData(
       useMaterial3: true,
       colorScheme: scheme,
-      scaffoldBackgroundColor: AppColors.canvasStrong,
+      scaffoldBackgroundColor: AppColors.canvas,
       dividerColor: AppColors.border,
     );
 
@@ -97,16 +100,18 @@ class AppTheme {
     return base.copyWith(
       textTheme: textTheme,
       appBarTheme: AppBarTheme(
-        backgroundColor: AppColors.canvasStrong,
+        backgroundColor: AppColors.canvas,
         foregroundColor: AppColors.ink,
         elevation: 0,
         scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         titleTextStyle: textTheme.titleLarge,
       ),
       cardTheme: CardThemeData(
-        color: const Color(0xCC1E2C3B),
+        color: AppColors.panel,
         elevation: 0,
         margin: EdgeInsets.zero,
+        surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(24)),
           side: BorderSide(color: AppColors.border.withValues(alpha: 0.8)),
@@ -114,19 +119,19 @@ class AppTheme {
       ),
       navigationBarTheme: NavigationBarThemeData(
         height: 72,
-        backgroundColor: const Color(0xCC1E2C3B),
+        backgroundColor: AppColors.panel,
         indicatorColor: scheme.primaryContainer.withValues(alpha: 0.92),
         elevation: 0,
         labelTextStyle: WidgetStatePropertyAll(
           textTheme.labelMedium?.copyWith(
             fontWeight: FontWeight.w700,
-            color: AppColors.ink,
+            color: AppColors.canvasStrong,
           ),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: const Color(0xB3202C3A),
+        fillColor: AppColors.panelRaised,
         hintStyle: textTheme.bodyMedium,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 16,
@@ -148,7 +153,7 @@ class AppTheme {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.primary,
-          foregroundColor: AppColors.canvasStrong,
+          foregroundColor: Colors.white,
           minimumSize: const Size.fromHeight(52),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
@@ -168,11 +173,13 @@ class AppTheme {
         ),
       ),
       snackBarTheme: SnackBarThemeData(
-        backgroundColor: const Color(0xE61D2938),
-        contentTextStyle: textTheme.bodyMedium?.copyWith(color: AppColors.ink),
+        backgroundColor: AppColors.canvasStrong,
+        contentTextStyle: textTheme.bodyMedium?.copyWith(color: Colors.white),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         behavior: SnackBarBehavior.floating,
       ),
     );
   }
+
+  static ThemeData dark() => light();
 }

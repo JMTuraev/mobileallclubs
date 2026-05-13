@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/app_router.dart';
 import '../../../core/widgets/app_backdrop.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../models/auth_bootstrap_models.dart';
 import '../../bootstrap/application/bootstrap_controller.dart';
 import '../application/package_actions_service.dart';
@@ -19,6 +20,15 @@ const packageGradientOptions = <String>[
 ];
 
 const packageGenderOptions = <String>['all', 'male', 'female'];
+
+const packageGradientLabels = <String, String>{
+  'from-indigo-500 to-indigo-700': 'Indigo',
+  'from-emerald-500 to-emerald-700': 'Emerald',
+  'from-rose-500 to-rose-700': 'Rose',
+  'from-sky-500 to-sky-700': 'Sky',
+  'from-purple-500 to-purple-700': 'Purple',
+  'from-amber-500 to-amber-700': 'Amber',
+};
 
 class CreatePackageScreen extends ConsumerStatefulWidget {
   const CreatePackageScreen({super.key, this.initialPackage});
@@ -136,10 +146,12 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
 
     try {
       if (_isEditMode) {
-        await ref.read(packageActionsServiceProvider).updatePackage(
-          packageId: widget.initialPackage!.id,
-          request: request,
-        );
+        await ref
+            .read(packageActionsServiceProvider)
+            .updatePackage(
+              packageId: widget.initialPackage!.id,
+              request: request,
+            );
       } else {
         await ref
             .read(packageActionsServiceProvider)
@@ -151,10 +163,7 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
       }
 
       setState(() {
-        _statusMessage =
-            _isEditMode
-            ? 'Package updated successfully. Returning to packages...'
-            : 'Package created successfully. Returning to packages...';
+        _statusMessage = _isEditMode ? 'Package updated.' : 'Package created.';
         _statusIsError = false;
       });
 
@@ -186,6 +195,15 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
     final totalDays =
         _readInt(_durationController, fallback: 0) +
         _readInt(_bonusDaysController);
+    final previewColors = _gradientPreviewColors(_gradient);
+    final previewName = _nameController.text.trim().isEmpty
+        ? 'New package'
+        : _nameController.text.trim();
+    final previewPrice = _priceController.text.trim().isEmpty
+        ? '0'
+        : _priceController.text.trim();
+    final previewSchedule =
+        '${_startTimeController.text.trim().isEmpty ? '00:00' : _startTimeController.text.trim()} - ${_endTimeController.text.trim().isEmpty ? '23:59' : _endTimeController.text.trim()}';
 
     return Scaffold(
       appBar: AppBar(
@@ -218,8 +236,8 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                               ),
                               const SizedBox(height: 12),
                               Text(
-                                'This route is available only for owner accounts with a resolved gym context.',
-                                style: theme.textTheme.bodyLarge,
+                                'Only the owner account can create packages.',
+                                style: theme.textTheme.bodyMedium,
                               ),
                               const SizedBox(height: 16),
                               FilledButton.icon(
@@ -240,21 +258,115 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    session?.gym?.name ?? 'Current gym',
-                                    style: theme.textTheme.headlineSmall,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    _isEditMode
-                                        ? 'Update this package template using the exact working web updatePackage contract.'
-                                        : 'Create a package template using the exact working web createPackage contract.',
-                                    style: theme.textTheme.bodyLarge,
+                                  Container(
+                                    padding: const EdgeInsets.all(18),
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(24),
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                        colors: [
+                                          previewColors.first.withValues(
+                                            alpha: 0.24,
+                                          ),
+                                          previewColors.last.withValues(
+                                            alpha: 0.12,
+                                          ),
+                                        ],
+                                      ),
+                                      border: Border.all(
+                                        color: previewColors.last.withValues(
+                                          alpha: 0.22,
+                                        ),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Container(
+                                          width: 74,
+                                          height: 74,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            gradient: LinearGradient(
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                              colors: previewColors,
+                                            ),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Text(
+                                            totalDays > 0 ? '$totalDays' : '-',
+                                            style: theme.textTheme.headlineSmall
+                                                ?.copyWith(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 16),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                previewName,
+                                                style:
+                                                    theme.textTheme.titleLarge,
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                '$previewPrice sum',
+                                                style: theme.textTheme.bodyLarge
+                                                    ?.copyWith(
+                                                      color: AppColors.primary,
+                                                    ),
+                                              ),
+                                              const SizedBox(height: 8),
+                                              Text(
+                                                session?.gym?.name ??
+                                                    'Current gym',
+                                                style:
+                                                    theme.textTheme.bodyMedium,
+                                              ),
+                                              const SizedBox(height: 10),
+                                              Wrap(
+                                                spacing: 8,
+                                                runSpacing: 8,
+                                                children: [
+                                                  _PreviewChip(
+                                                    icon: Icons.repeat_rounded,
+                                                    label: '$totalDays visits',
+                                                  ),
+                                                  _PreviewChip(
+                                                    icon: Icons.wc_rounded,
+                                                    label: _gender,
+                                                  ),
+                                                  _PreviewChip(
+                                                    icon:
+                                                        Icons.schedule_rounded,
+                                                    label: previewSchedule,
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                   const SizedBox(height: 20),
+                                  Text(
+                                    'Main info',
+                                    style: theme.textTheme.titleMedium,
+                                  ),
+                                  const SizedBox(height: 12),
                                   TextFormField(
                                     controller: _nameController,
                                     textInputAction: TextInputAction.next,
+                                    onChanged: (_) => setState(() {}),
                                     decoration: const InputDecoration(
                                       labelText: 'Package name',
                                     ),
@@ -270,6 +382,7 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                                     controller: _priceController,
                                     keyboardType: TextInputType.number,
                                     textInputAction: TextInputAction.next,
+                                    onChanged: (_) => setState(() {}),
                                     decoration: const InputDecoration(
                                       labelText: 'Price',
                                     ),
@@ -321,9 +434,34 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                                     ],
                                   ),
                                   const SizedBox(height: 12),
+                                  Container(
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: theme
+                                          .colorScheme
+                                          .surfaceContainerHighest,
+                                      borderRadius: BorderRadius.circular(18),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.info_outline_rounded,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            'Visits automatically: $totalDays',
+                                            style: theme.textTheme.bodyMedium,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
                                   Text(
-                                    'Visit limit is locked to total days: $totalDays',
-                                    style: theme.textTheme.bodyMedium,
+                                    'Rules',
+                                    style: theme.textTheme.titleMedium,
                                   ),
                                   const SizedBox(height: 12),
                                   Row(
@@ -332,6 +470,7 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                                         child: TextFormField(
                                           controller: _startTimeController,
                                           textInputAction: TextInputAction.next,
+                                          onChanged: (_) => setState(() {}),
                                           decoration: const InputDecoration(
                                             labelText: 'Start time',
                                           ),
@@ -342,6 +481,7 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                                         child: TextFormField(
                                           controller: _endTimeController,
                                           textInputAction: TextInputAction.next,
+                                          onChanged: (_) => setState(() {}),
                                           decoration: const InputDecoration(
                                             labelText: 'End time',
                                           ),
@@ -370,6 +510,11 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                                     ),
                                   ],
                                   const SizedBox(height: 12),
+                                  Text(
+                                    'Extra',
+                                    style: theme.textTheme.titleMedium,
+                                  ),
+                                  const SizedBox(height: 12),
                                   DropdownButtonFormField<String>(
                                     initialValue: _gender,
                                     decoration: const InputDecoration(
@@ -392,6 +537,7 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                                   const SizedBox(height: 12),
                                   DropdownButtonFormField<String>(
                                     initialValue: _gradient,
+                                    isExpanded: true,
                                     decoration: const InputDecoration(
                                       labelText: 'Gradient',
                                     ),
@@ -399,7 +545,28 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                                         .map(
                                           (value) => DropdownMenuItem(
                                             value: value,
-                                            child: Text(value),
+                                            child: Row(
+                                              children: [
+                                                Container(
+                                                  width: 14,
+                                                  height: 14,
+                                                  decoration: BoxDecoration(
+                                                    shape: BoxShape.circle,
+                                                    gradient: LinearGradient(
+                                                      colors:
+                                                          _gradientPreviewColors(
+                                                            value,
+                                                          ),
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 10),
+                                                Text(
+                                                  packageGradientLabels[value] ??
+                                                      value,
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         )
                                         .toList(growable: false),
@@ -421,14 +588,25 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                                   ),
                                   if (_statusMessage != null) ...[
                                     const SizedBox(height: 12),
-                                    Text(
-                                      _statusMessage!,
-                                      style: theme.textTheme.bodyMedium
-                                          ?.copyWith(
-                                            color: _statusIsError
-                                                ? theme.colorScheme.error
-                                                : theme.colorScheme.primary,
-                                          ),
+                                    Container(
+                                      padding: const EdgeInsets.all(14),
+                                      decoration: BoxDecoration(
+                                        color:
+                                            (_statusIsError
+                                                    ? AppColors.danger
+                                                    : AppColors.success)
+                                                .withValues(alpha: 0.14),
+                                        borderRadius: BorderRadius.circular(18),
+                                      ),
+                                      child: Text(
+                                        _statusMessage!,
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                              color: _statusIsError
+                                                  ? AppColors.danger
+                                                  : AppColors.success,
+                                            ),
+                                      ),
                                     ),
                                   ],
                                   const SizedBox(height: 20),
@@ -446,10 +624,10 @@ class _CreatePackageScreenState extends ConsumerState<CreatePackageScreen> {
                                     label: Text(
                                       _isSubmitting
                                           ? (_isEditMode
-                                                ? 'Saving package...'
-                                                : 'Creating package...')
+                                                ? 'Saving...'
+                                                : 'Creating...')
                                           : (_isEditMode
-                                                ? 'Save changes'
+                                                ? 'Save'
                                                 : 'Create package'),
                                     ),
                                   ),
@@ -481,4 +659,61 @@ String _formatPackageAmount(num value) {
   }
 
   return value.toStringAsFixed(2);
+}
+
+List<Color> _gradientPreviewColors(String? gradient) {
+  return switch (gradient) {
+    'from-emerald-500 to-emerald-700' => const [
+      Color(0xFF58D49D),
+      Color(0xFF25895B),
+    ],
+    'from-rose-500 to-rose-700' => const [Color(0xFFFF637F), Color(0xFFC21F4F)],
+    'from-sky-500 to-sky-700' => const [Color(0xFF60C8FF), Color(0xFF2B7BCA)],
+    'from-purple-500 to-purple-700' => const [
+      Color(0xFFC571FF),
+      Color(0xFF7C36E1),
+    ],
+    'from-amber-500 to-amber-700' => const [
+      Color(0xFFFFC451),
+      Color(0xFFC27E00),
+    ],
+    _ => const [Color(0xFF7D74FF), Color(0xFF5149E8)],
+  };
+}
+
+class _PreviewChip extends StatelessWidget {
+  const _PreviewChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: 0.72,
+        ),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: AppColors.primary),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.labelLarge,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

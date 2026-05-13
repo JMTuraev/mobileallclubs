@@ -1,8 +1,7 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
+import '../../../core/config/developer_tools.dart';
 import '../../../core/services/firebase_clients.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/section_title.dart';
@@ -133,11 +132,11 @@ class _BootstrapGateScreenState extends ConsumerState<BootstrapGateScreen> {
                               ),
                             ),
                           ],
-                          if (kDebugMode) ...[
+                          if (showDeveloperDiagnosticsShortcut) ...[
                             const SizedBox(height: 8),
                             OutlinedButton.icon(
                               onPressed: () =>
-                                  context.go('/dev/firebase-diagnostics'),
+                                  openDeveloperDiagnostics(context),
                               icon: const Icon(Icons.developer_mode_rounded),
                               label: const Text(
                                 'Open Developer Firebase Diagnostics',

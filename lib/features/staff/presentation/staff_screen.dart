@@ -1,8 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/developer_tools.dart';
 import '../../../core/routing/app_router.dart';
 import '../../../core/services/firebase_clients.dart';
 import '../../../core/widgets/app_backdrop.dart';
@@ -399,8 +399,15 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
                         _StaffErrorCard(message: error.toString()),
                     data: (staff) {
                       final visibleStaff = staff
-                          .where((member) => !_removedStaffIds.contains(member.id))
-                          .map((member) => _applyLocalOverrides(member, activeStaffIdsAsync))
+                          .where(
+                            (member) => !_removedStaffIds.contains(member.id),
+                          )
+                          .map(
+                            (member) => _applyLocalOverrides(
+                              member,
+                              activeStaffIdsAsync,
+                            ),
+                          )
                           .toList(growable: false);
 
                       final activeCount = visibleStaff
@@ -502,11 +509,11 @@ class _StaffScreenState extends ConsumerState<StaffScreen> {
                                 ),
                               ),
                             ),
-                          if (kDebugMode) ...[
+                          if (showDeveloperDiagnosticsShortcut) ...[
                             const SizedBox(height: 8),
                             OutlinedButton.icon(
                               onPressed: () =>
-                                  context.go(AppRoutes.firebaseDiagnostics),
+                                  openDeveloperDiagnostics(context),
                               icon: const Icon(Icons.developer_mode_rounded),
                               label: const Text(
                                 'Open Developer Firebase Diagnostics',
@@ -794,12 +801,10 @@ class _Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final imageUrl = member.imageUrl?.trim();
 
-    if (member.imageUrl != null && member.imageUrl!.isNotEmpty) {
-      return CircleAvatar(
-        radius: 28,
-        foregroundImage: NetworkImage(member.imageUrl!),
-      );
+    if (imageUrl != null && imageUrl.isNotEmpty) {
+      return CircleAvatar(radius: 28, foregroundImage: NetworkImage(imageUrl));
     }
 
     return CircleAvatar(

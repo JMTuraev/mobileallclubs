@@ -1,5 +1,6 @@
 import 'package:cloud_functions/cloud_functions.dart';
 
+import '../../../core/utils/backend_action_error.dart';
 import '../domain/gym_staff_summary.dart';
 
 class CreateStaffRequest {
@@ -107,11 +108,13 @@ Future<CreateStaffResult> createStaff({
       message: data is Map ? data['message']?.toString() : null,
     );
   } on FirebaseFunctionsException catch (error) {
-    final message =
-        error.details?.toString() ?? error.message ?? 'Failed to create staff';
-    throw Exception(message);
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to create staff'),
+    );
   } catch (error) {
-    throw Exception(error.toString());
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to create staff'),
+    );
   }
 }
 
@@ -151,10 +154,16 @@ Future<StaffActionResult> setStaffActiveState({
     final fallback = isActive
         ? 'Failed to reactivate staff member'
         : 'Failed to deactivate staff member';
-    final message = error.details?.toString() ?? error.message ?? fallback;
-    throw Exception(message);
+    throw Exception(describeBackendActionError(error, fallback: fallback));
   } catch (error) {
-    throw Exception(error.toString());
+    throw Exception(
+      describeBackendActionError(
+        error,
+        fallback: isActive
+            ? 'Failed to reactivate staff member'
+            : 'Failed to deactivate staff member',
+      ),
+    );
   }
 }
 
@@ -183,11 +192,13 @@ Future<StaffActionResult> removeStaffMember({
       userId: data is Map ? data['userId']?.toString() : normalizedUserId,
     );
   } on FirebaseFunctionsException catch (error) {
-    final message =
-        error.details?.toString() ?? error.message ?? 'Failed to remove staff';
-    throw Exception(message);
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to remove staff'),
+    );
   } catch (error) {
-    throw Exception(error.toString());
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to remove staff'),
+    );
   }
 }
 
@@ -223,11 +234,13 @@ Future<StaffActionResult> updateStaffMember({
       userId: data is Map ? data['userId']?.toString() : normalizedUserId,
     );
   } on FirebaseFunctionsException catch (error) {
-    final message =
-        error.details?.toString() ?? error.message ?? 'Failed to update staff';
-    throw Exception(message);
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to update staff'),
+    );
   } catch (error) {
-    throw Exception(error.toString());
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to update staff'),
+    );
   }
 }
 

@@ -1,9 +1,9 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/auth/presentation/authenticated_shell_screen.dart';
+import '../config/developer_tools.dart';
+import '../../features/auth/presentation/profile_screen.dart';
 import '../../features/bar/presentation/bar_admin_screen.dart';
 import '../../features/bar/presentation/bar_pos_screen.dart';
 import '../../features/bar/presentation/bar_menu_screen.dart';
@@ -31,6 +31,7 @@ import '../../features/packages/presentation/packages_screen.dart';
 import '../../features/sessions/presentation/sessions_screen.dart';
 import '../../features/staff/presentation/create_staff_screen.dart';
 import '../../features/staff/presentation/staff_screen.dart';
+import '../widgets/app_route_back_scope.dart';
 import '../widgets/app_shell_scaffold.dart';
 
 abstract final class AppRoutes {
@@ -42,12 +43,14 @@ abstract final class AppRoutes {
   static const acceptInvite = '/accept-invite';
   static const createGym = '/auth/create-gym';
   static const verifyEmail = '/auth/verify-email';
-  static const app = '/app';
+  static const appRoot = '/app';
+  static const profile = '/app/profile';
+  static const app = '/app/clients';
   static const stats = '/app/stats';
   static const barMenu = '/app/bar/pos';
   static const barGuestPos = '/app/bar/pos/guest';
   static const barAdmin = '/app/bar/admin';
-  static const clients = '/app/clients';
+  static const clients = app;
   static const createClient = '/app/clients/create';
   static const sessions = '/app/sessions';
   static const finance = '/app/finance';
@@ -59,6 +62,10 @@ abstract final class AppRoutes {
   static const createStaff = '/app/staffs/create';
   static const staffInvites = '/app/staffs/invites';
   static String clientDetail(String clientId) => '$clients/$clientId';
+  static String clientsWithHighlight(String clientId) => Uri(
+    path: clients,
+    queryParameters: {'highlightClientId': clientId},
+  ).toString();
   static String activatePackage(String clientId) =>
       '${clientDetail(clientId)}/activate-package';
   static String collectPayment(String clientId) =>
@@ -69,10 +76,19 @@ abstract final class AppRoutes {
   ).toString();
   static String sessionsForClient(String clientId) =>
       Uri(path: sessions, queryParameters: {'clientId': clientId}).toString();
+  static String profileWithSection(String section) =>
+      Uri(path: profile, queryParameters: {'section': section}).toString();
   static const firebaseDiagnostics = '/dev/firebase-diagnostics';
 }
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
+
+Widget _withBackScope({
+  required Widget child,
+  required String fallbackLocation,
+}) {
+  return AppRouteBackScope(fallbackLocation: fallbackLocation, child: child);
+}
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final bootstrapState = ref.watch(bootstrapControllerProvider);
@@ -116,6 +132,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: AppRoutes.verifyEmail,
         builder: (context, state) => const VerifyEmailScreen(),
       ),
+      GoRoute(
+        path: AppRoutes.appRoot,
+        redirect: (context, state) => AppRoutes.app,
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, navigationShell) => AppShellScaffold(
           navigationShell: navigationShell,
@@ -126,8 +146,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: AppRoutes.app,
-                builder: (context, state) => const AuthenticatedShellScreen(),
+                path: AppRoutes.profile,
+                builder: (context, state) => ProfileScreen(
+                  section: state.uri.queryParameters['section'],
+                ),
               ),
             ],
           ),
@@ -135,7 +157,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: AppRoutes.clients,
-                builder: (context, state) => const ClientsScreen(),
+                builder: (context, state) => ClientsScreen(
+                  highlightClientId:
+                      state.uri.queryParameters['highlightClientId'],
+                ),
               ),
             ],
           ),
@@ -169,113 +194,170 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.stats,
-        builder: (context, state) => const DashboardScreen(),
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.app,
+          child: const DashboardScreen(),
+        ),
       ),
       GoRoute(
         path: AppRoutes.barMenu,
-        builder: (context, state) => const BarMenuScreen(),
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.app,
+          child: const BarMenuScreen(),
+        ),
       ),
       GoRoute(
         path: AppRoutes.barGuestPos,
-        builder: (context, state) => const BarPosScreen(isGuestMode: true),
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.barMenu,
+          child: const BarPosScreen(isGuestMode: true),
+        ),
       ),
       GoRoute(
         path: AppRoutes.barAdmin,
-        builder: (context, state) => const BarAdminScreen(),
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.barMenu,
+          child: const BarAdminScreen(),
+        ),
       ),
       GoRoute(
         path: AppRoutes.createClient,
-        builder: (context, state) => const CreateClientScreen(),
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.clients,
+          child: const CreateClientScreen(),
+        ),
       ),
       GoRoute(
         path: AppRoutes.createPackage,
-        builder: (context, state) => const CreatePackageScreen(),
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.packages,
+          child: const CreatePackageScreen(),
+        ),
       ),
-        GoRoute(
-          path: AppRoutes.editPackage,
-          builder: (context, state) {
-            final package = state.extra;
-            if (package is! GymPackageSummary) {
+      GoRoute(
+        path: AppRoutes.editPackage,
+        builder: (context, state) {
+          final package = state.extra;
+          if (package is! GymPackageSummary) {
             return const Directionality(
               textDirection: TextDirection.ltr,
               child: Center(child: Text('Missing package edit context')),
             );
           }
 
-            return CreatePackageScreen(initialPackage: package);
-          },
-        ),
-        GoRoute(
-          path: AppRoutes.packageSubscriptionAction,
-          builder: (context, state) {
-            final args = state.extra;
-            if (args is! ActivatePackageRouteArgs) {
-              return const Directionality(
-                textDirection: TextDirection.ltr,
-                child: Center(
-                  child: Text('Missing sold subscription action context'),
-                ),
-              );
-            }
+          return _withBackScope(
+            fallbackLocation: AppRoutes.packages,
+            child: CreatePackageScreen(initialPackage: package),
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.packageSubscriptionAction,
+        builder: (context, state) {
+          final args = state.extra;
+          if (args is! ActivatePackageRouteArgs) {
+            return const Directionality(
+              textDirection: TextDirection.ltr,
+              child: Center(
+                child: Text('Missing sold subscription action context'),
+              ),
+            );
+          }
 
-            return ActivatePackageScreen(
+          return _withBackScope(
+            fallbackLocation: AppRoutes.clientDetail(args.clientId),
+            child: ActivatePackageScreen(
               clientId: args.clientId,
               clientName: args.clientName,
               clientPhone: args.clientPhone,
               editSubscription: args.editSubscription,
               editStartOnly: args.editStartOnly,
               popOnSuccess: args.popOnSuccess,
-            );
-          },
-        ),
-        GoRoute(
-          path: '${AppRoutes.clients}/:clientId',
-          builder: (context, state) => ClientDetailScreen(
-          clientId: state.pathParameters['clientId'] ?? '',
+            ),
+          );
+        },
+      ),
+      GoRoute(
+        path: '${AppRoutes.clients}/:clientId',
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.clientsWithHighlight(
+            state.pathParameters['clientId'] ?? '',
+          ),
+          child: ClientDetailScreen(
+            clientId: state.pathParameters['clientId'] ?? '',
+          ),
         ),
       ),
       GoRoute(
         path: '${AppRoutes.clients}/:clientId/activate-package',
-        builder: (context, state) => ActivatePackageScreen(
-          clientId: state.pathParameters['clientId'] ?? '',
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.clientDetail(
+            state.pathParameters['clientId'] ?? '',
+          ),
+          child: ActivatePackageScreen(
+            clientId: state.pathParameters['clientId'] ?? '',
+          ),
         ),
       ),
       GoRoute(
         path: '${AppRoutes.clients}/:clientId/collect-payment',
-        builder: (context, state) => CollectPaymentScreen(
-          clientId: state.pathParameters['clientId'] ?? '',
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.clientDetail(
+            state.pathParameters['clientId'] ?? '',
+          ),
+          child: CollectPaymentScreen(
+            clientId: state.pathParameters['clientId'] ?? '',
+          ),
         ),
       ),
       GoRoute(
         path: '${AppRoutes.clients}/:clientId/bar',
-        builder: (context, state) => BarPosScreen(
-          clientId: state.pathParameters['clientId'] ?? '',
-          sessionId: state.uri.queryParameters['sessionId'] ?? '',
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.clientsWithHighlight(
+            state.pathParameters['clientId'] ?? '',
+          ),
+          child: BarPosScreen(
+            clientId: state.pathParameters['clientId'] ?? '',
+            sessionId: state.uri.queryParameters['sessionId'] ?? '',
+          ),
         ),
       ),
       GoRoute(
         path: AppRoutes.staff,
-        builder: (context, state) => const StaffScreen(),
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.app,
+          child: const StaffScreen(),
+        ),
       ),
       GoRoute(
         path: AppRoutes.createStaff,
-        builder: (context, state) => const CreateStaffScreen(),
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.staff,
+          child: const CreateStaffScreen(),
+        ),
       ),
       GoRoute(
         path: AppRoutes.staffInvites,
-        builder: (context, state) => const InvitesScreen(),
+        builder: (context, state) => _withBackScope(
+          fallbackLocation: AppRoutes.staff,
+          child: const InvitesScreen(),
+        ),
       ),
-      if (kDebugMode)
+      if (showDeveloperDiagnosticsShortcut)
         GoRoute(
           path: AppRoutes.firebaseDiagnostics,
-          builder: (context, state) => const FirebaseDiagnosticsScreen(),
+          builder: (context, state) => _withBackScope(
+            fallbackLocation: AppRoutes.app,
+            child: const FirebaseDiagnosticsScreen(),
+          ),
         ),
     ],
   );
 });
 
 String? _redirectForBootstrapState(BootstrapState state, String location) {
-  if (kDebugMode && location == AppRoutes.firebaseDiagnostics) {
+  if (showDeveloperDiagnosticsShortcut &&
+      location == AppRoutes.firebaseDiagnostics) {
     return null;
   }
 
@@ -297,7 +379,9 @@ String? _redirectForBootstrapState(BootstrapState state, String location) {
   }
 
   if (state.isAuthenticated) {
-    if (location == AppRoutes.app ||
+    if (location == AppRoutes.appRoot ||
+        location == AppRoutes.app ||
+        location == AppRoutes.profile ||
         location == AppRoutes.clients ||
         location == AppRoutes.createClient ||
         location == AppRoutes.stats ||
@@ -318,7 +402,7 @@ String? _redirectForBootstrapState(BootstrapState state, String location) {
       return null;
     }
 
-    return AppRoutes.app;
+    return AppRoutes.clients;
   }
 
   if (state.requiresEmailVerification) {

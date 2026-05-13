@@ -2,10 +2,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../core/localization/app_currency.dart';
 import '../../../core/routing/app_router.dart';
+import '../../../core/widgets/app_route_back_scope.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
 import '../../../models/auth_bootstrap_models.dart';
@@ -571,6 +572,7 @@ class _BarAdminScreenState extends ConsumerState<BarAdminScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(appCurrencyProvider);
     final bootstrapState = ref.watch(bootstrapControllerProvider);
     final session = bootstrapState.session;
     final categoriesAsync = ref.watch(currentGymBarCategoriesProvider);
@@ -580,7 +582,10 @@ class _BarAdminScreenState extends ConsumerState<BarAdminScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          onPressed: () => context.go(AppRoutes.barMenu),
+          onPressed: () => handleAppRouteBack(
+            context,
+            fallbackLocation: AppRoutes.barMenu,
+          ),
           icon: const Icon(Icons.arrow_back_rounded),
           tooltip: 'Back to POS menu',
         ),
@@ -732,14 +737,15 @@ class _BarAdminScreenState extends ConsumerState<BarAdminScreen> {
                           const SizedBox(height: 12),
                           Expanded(
                             child: switch (_selectedSection) {
-                              _BarAdminSection.categories => _BarAdminCategoriesTab(
-                                controller: _newCategoryController,
-                                isBusy: _isCategoryBusy,
-                                categories: categories,
-                                onCreate: _createCategory,
-                                onEdit: _editCategory,
-                                onDelete: _deleteCategory,
-                              ),
+                              _BarAdminSection.categories =>
+                                _BarAdminCategoriesTab(
+                                  controller: _newCategoryController,
+                                  isBusy: _isCategoryBusy,
+                                  categories: categories,
+                                  onCreate: _createCategory,
+                                  onEdit: _editCategory,
+                                  onDelete: _deleteCategory,
+                                ),
                               _BarAdminSection.products => _BarAdminProductsTab(
                                 categories: categories,
                                 selectedCategoryId: _selectedProductCategoryId,
@@ -757,8 +763,7 @@ class _BarAdminScreenState extends ConsumerState<BarAdminScreen> {
                               ),
                               _BarAdminSection.incoming => _BarAdminIncomingTab(
                                 categories: categories,
-                                selectedCategoryId:
-                                    _selectedIncomingCategoryId,
+                                selectedCategoryId: _selectedIncomingCategoryId,
                                 onSelectCategory: (categoryId) {
                                   setState(() {
                                     _selectedIncomingCategoryId = categoryId;
@@ -973,64 +978,71 @@ class _BarAdminCategoriesTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: controller,
-                  decoration: const InputDecoration(
-                    labelText: 'Category name',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton(
-                    onPressed: isBusy ? null : onCreate,
-                    child: Text(isBusy ? 'Saving...' : 'Add'),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        ...categories.map(
-          (category) => Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(category.name, style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 4),
-                    Text('ID ${category.id}'),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        FilledButton.tonal(
-                          onPressed: isBusy ? null : () => onEdit(category),
-                          child: const Text('Edit'),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: controller,
+                        decoration: const InputDecoration(
+                          labelText: 'Category name',
                         ),
-                        FilledButton.tonal(
-                          onPressed: isBusy ? null : () => onDelete(category),
-                          child: const Text('Delete'),
+                      ),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton(
+                          onPressed: isBusy ? null : onCreate,
+                          child: Text(isBusy ? 'Saving...' : 'Add'),
                         ),
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ),
-        ),
+              const SizedBox(height: 12),
+              ...categories.map(
+                (category) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            category.name,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 4),
+                          Text('ID ${category.id}'),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              FilledButton.tonal(
+                                onPressed: isBusy
+                                    ? null
+                                    : () => onEdit(category),
+                                child: const Text('Edit'),
+                              ),
+                              FilledButton.tonal(
+                                onPressed: isBusy
+                                    ? null
+                                    : () => onDelete(category),
+                                child: const Text('Delete'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1075,128 +1087,141 @@ class _BarAdminProductsTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Products',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton(
-                    onPressed: isBusy ? null : onCreate,
-                    child: const Text('New product'),
-                  ),
-                ),
-                if (categories.isEmpty)
-                  const Text('Create a category first.')
-                else
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: categories
-                        .map(
-                          (category) => ChoiceChip(
-                            label: Text(category.name),
-                            selected: category.id == selectedCategoryId,
-                            onSelected: (_) => onSelectCategory(category.id),
-                          ),
-                        )
-                        .toList(growable: false),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (products.isEmpty)
-          const Card(
-            child: Padding(
-              padding: EdgeInsets.all(20),
-              child: Text('No active products matched the selected category.'),
-            ),
-          )
-        else
-          ...products.map(
-            (product) => Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Card(
+              Card(
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(20),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          product.image?.isNotEmpty == true
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    product.image!,
-                                    width: 48,
-                                    height: 48,
-                                    fit: BoxFit.cover,
-                                    errorBuilder:
-                                        (context, error, stackTrace) =>
-                                            const SizedBox(
-                                              width: 48,
-                                              height: 48,
-                                              child: Icon(
-                                                Icons.broken_image_outlined,
-                                              ),
-                                            ),
-                                  ),
-                                )
-                              : const SizedBox(
-                                  width: 48,
-                                  height: 48,
-                                  child: Icon(Icons.local_bar_outlined),
-                                ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  product.name,
-                                  style: Theme.of(context).textTheme.titleMedium,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${_formatMoney(product.price ?? 0)} so\'m • Stock ${product.availableStock}',
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+                      Text(
+                        'Products',
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          FilledButton.tonal(
-                            onPressed: isBusy ? null : () => onEdit(product),
-                            child: const Text('Edit'),
-                          ),
-                          FilledButton.tonal(
-                            onPressed: isBusy ? null : () => onDelete(product),
-                            child: const Text('Delete'),
-                          ),
-                        ],
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton(
+                          onPressed: isBusy ? null : onCreate,
+                          child: const Text('New product'),
+                        ),
                       ),
+                      if (categories.isEmpty)
+                        const Text('Create a category first.')
+                      else
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: categories
+                              .map(
+                                (category) => ChoiceChip(
+                                  label: Text(category.name),
+                                  selected: category.id == selectedCategoryId,
+                                  onSelected: (_) =>
+                                      onSelectCategory(category.id),
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
                     ],
                   ),
                 ),
               ),
-            ),
-          ),
+              const SizedBox(height: 12),
+              if (products.isEmpty)
+                const Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Text(
+                      'No active products matched the selected category.',
+                    ),
+                  ),
+                )
+              else
+                ...products.map(
+                  (product) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                product.image?.isNotEmpty == true
+                                    ? ClipRRect(
+                                        borderRadius: BorderRadius.circular(12),
+                                        child: Image.network(
+                                          product.image!,
+                                          width: 48,
+                                          height: 48,
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (
+                                                context,
+                                                error,
+                                                stackTrace,
+                                              ) => const SizedBox(
+                                                width: 48,
+                                                height: 48,
+                                                child: Icon(
+                                                  Icons.broken_image_outlined,
+                                                ),
+                                              ),
+                                        ),
+                                      )
+                                    : const SizedBox(
+                                        width: 48,
+                                        height: 48,
+                                        child: Icon(Icons.local_bar_outlined),
+                                      ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        product.name,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleMedium,
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        '${_formatMoney(product.price ?? 0, withUnit: true)} • Stock ${product.availableStock}',
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                FilledButton.tonal(
+                                  onPressed: isBusy
+                                      ? null
+                                      : () => onEdit(product),
+                                  child: const Text('Edit'),
+                                ),
+                                FilledButton.tonal(
+                                  onPressed: isBusy
+                                      ? null
+                                      : () => onDelete(product),
+                                  child: const Text('Delete'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -1251,206 +1276,229 @@ class _BarAdminIncomingTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Create incoming invoice',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                if (categories.isEmpty)
-                  const Text('Create a category first.')
-                else
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: categories
-                        .map(
-                          (category) => ChoiceChip(
-                            label: Text(category.name),
-                            selected: category.id == selectedCategoryId,
-                            onSelected: (_) => onSelectCategory(category.id),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Create incoming invoice',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      if (categories.isEmpty)
+                        const Text('Create a category first.')
+                      else
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: categories
+                              .map(
+                                (category) => ChoiceChip(
+                                  label: Text(category.name),
+                                  selected: category.id == selectedCategoryId,
+                                  onSelected: (_) =>
+                                      onSelectCategory(category.id),
+                                ),
+                              )
+                              .toList(growable: false),
+                        ),
+                      const SizedBox(height: 12),
+                      ...products.map(
+                        (product) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            padding: const EdgeInsets.all(14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  product.name,
+                                  style: Theme.of(
+                                    context,
+                                  ).textTheme.titleMedium,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${_formatMoney(product.price ?? 0, withUnit: true)} • Stock ${product.availableStock}',
+                                ),
+                                const SizedBox(height: 12),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: FilledButton.tonal(
+                                    onPressed: isBusy
+                                        ? null
+                                        : () => onAddProduct(product),
+                                    child: const Text('Add'),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Draft invoice',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: FilledButton(
+                          onPressed: isBusy ? null : onSave,
+                          child: Text(isBusy ? 'Saving...' : 'Save incoming'),
+                        ),
+                      ),
+                      if (invoiceItems.isEmpty)
+                        const Text('No products added yet.')
+                      else
+                        ...invoiceItems.map(
+                          (item) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              padding: const EdgeInsets.all(14),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    item.name,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleMedium,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Qty ${item.quantity} • ${_formatMoney(item.purchasePrice, withUnit: true)}',
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      FilledButton.tonal(
+                                        onPressed: isBusy
+                                            ? null
+                                            : () => onDecreaseQty(item),
+                                        child: const Text('−'),
+                                      ),
+                                      FilledButton.tonal(
+                                        onPressed: isBusy
+                                            ? null
+                                            : () => onIncreaseQty(item),
+                                        child: const Text('+'),
+                                      ),
+                                      FilledButton.tonal(
+                                        onPressed: isBusy
+                                            ? null
+                                            : () => onEditPrice(item),
+                                        child: const Text('Price'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Incoming history',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 12),
+                      if (history.isEmpty)
+                        const Text(
+                          'No incoming invoices were returned for this gym.',
                         )
-                        .toList(growable: false),
-                  ),
-                const SizedBox(height: 12),
-                ...products.map(
-                  (product) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            product.name,
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            '${_formatMoney(product.price ?? 0)} so\'m • Stock ${product.availableStock}',
-                          ),
-                          const SizedBox(height: 12),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: FilledButton.tonal(
-                              onPressed: isBusy ? null : () => onAddProduct(product),
-                              child: const Text('Add'),
+                      else
+                        ...history.map(
+                          (invoice) => Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              padding: const EdgeInsets.all(14),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    invoice.invoiceNumber ?? invoice.id,
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.titleMedium,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${invoice.items.length} items • Qty ${invoice.totalQuantity} • ${_formatTime(invoice.createdAt)}',
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
+                                    children: [
+                                      Text(
+                                        _formatMoney(
+                                          invoice.total ?? 0,
+                                          withUnit: true,
+                                        ),
+                                      ),
+                                      FilledButton.tonal(
+                                        onPressed: isBusy
+                                            ? null
+                                            : () => onDeleteInvoice(invoice),
+                                        child: const Text('Delete'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        ],
-                      ),
-                    ),
+                        ),
+                    ],
                   ),
                 ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Draft invoice',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton(
-                    onPressed: isBusy ? null : onSave,
-                    child: Text(isBusy ? 'Saving...' : 'Save incoming'),
-                  ),
-                ),
-                if (invoiceItems.isEmpty)
-                  const Text('No products added yet.')
-                else
-                  ...invoiceItems.map(
-                    (item) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        padding: const EdgeInsets.all(14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.name,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Qty ${item.quantity} • ${_formatMoney(item.purchasePrice)} so\'m',
-                            ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                FilledButton.tonal(
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => onDecreaseQty(item),
-                                  child: const Text('−'),
-                                ),
-                                FilledButton.tonal(
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => onIncreaseQty(item),
-                                  child: const Text('+'),
-                                ),
-                                FilledButton.tonal(
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => onEditPrice(item),
-                                  child: const Text('Price'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Incoming history',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                if (history.isEmpty)
-                  const Text('No incoming invoices were returned for this gym.')
-                else
-                  ...history.map(
-                    (invoice) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        padding: const EdgeInsets.all(14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              invoice.invoiceNumber ?? invoice.id,
-                              style: Theme.of(context).textTheme.titleMedium,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${invoice.items.length} items • Qty ${invoice.totalQuantity} • ${_formatTime(invoice.createdAt)}',
-                            ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Text('${_formatMoney(invoice.total ?? 0)} so\'m'),
-                                FilledButton.tonal(
-                                  onPressed: isBusy
-                                      ? null
-                                      : () => onDeleteInvoice(invoice),
-                                  child: const Text('Delete'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
+              ),
             ],
           ),
         ),
@@ -1657,12 +1705,8 @@ bool _canManageBar(ResolvedAuthSession? session) {
   return gymId != null && gymId.isNotEmpty && role == AllClubsRole.owner;
 }
 
-String _formatMoney(num value) {
-  if (value == value.roundToDouble()) {
-    return value.toInt().toString();
-  }
-
-  return value.toStringAsFixed(2);
+String _formatMoney(num value, {bool withUnit = false}) {
+  return formatAppMoney(value, withUnit: withUnit);
 }
 
 String _formatTime(DateTime? value) {

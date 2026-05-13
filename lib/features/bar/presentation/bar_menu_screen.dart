@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/app_router.dart';
+import '../../../core/widgets/app_route_back_scope.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
 import '../../../models/auth_bootstrap_models.dart';
@@ -22,7 +23,10 @@ class BarMenuScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          onPressed: () => context.go(AppRoutes.app),
+          onPressed: () => handleAppRouteBack(
+            context,
+            fallbackLocation: AppRoutes.app,
+          ),
           icon: const Icon(Icons.arrow_back_rounded),
           tooltip: 'Back to app',
         ),
@@ -339,14 +343,11 @@ class _ActiveSessionCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _InfoChip(
-                  icon: Icons.badge_outlined,
-                  label: 'Client ${session.clientId ?? '-'}',
-                ),
-                _InfoChip(
-                  icon: Icons.lock_outline_rounded,
-                  label: 'Locker ${session.displayLocker}',
-                ),
+                if (session.displayLocker != '-')
+                  _InfoChip(
+                    icon: Icons.lock_outline_rounded,
+                    label: session.displayLocker,
+                  ),
                 _InfoChip(
                   icon: Icons.timer_outlined,
                   label: 'Started ${_formatTime(session.startedAt)}',

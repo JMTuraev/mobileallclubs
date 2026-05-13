@@ -5,9 +5,7 @@ import 'package:flutter/foundation.dart'
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
-      throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web in this repo.',
-      );
+      return web;
     }
 
     switch (defaultTargetPlatform) {
@@ -47,6 +45,15 @@ class DefaultFirebaseOptions {
     appId: '1:1047960307680:android:0a8ee87af4811d6a2d0d85',
     messagingSenderId: '1047960307680',
     projectId: 'allclubs',
+    storageBucket: 'allclubs.firebasestorage.app',
+  );
+
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: 'AIzaSyCIk0PpgK41pCl3EeBqXCn65y02IMe5p1c',
+    appId: '1:1047960307680:web:0a8ee87af4811d6a2d0d85',
+    messagingSenderId: '1047960307680',
+    projectId: 'allclubs',
+    authDomain: 'allclubs.firebaseapp.com',
     storageBucket: 'allclubs.firebasestorage.app',
   );
 }

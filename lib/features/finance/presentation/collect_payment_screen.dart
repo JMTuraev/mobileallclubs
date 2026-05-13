@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/localization/app_currency.dart';
 import '../../../core/routing/app_router.dart';
+import '../../../core/widgets/app_route_back_scope.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../models/payment_amounts.dart';
 import '../../clients/application/client_detail_providers.dart';
@@ -207,6 +209,7 @@ class _CollectPaymentScreenState extends ConsumerState<CollectPaymentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(appCurrencyProvider);
     final clientAsync = ref.watch(
       currentGymClientDocumentProvider(widget.clientId),
     );
@@ -220,7 +223,10 @@ class _CollectPaymentScreenState extends ConsumerState<CollectPaymentScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          onPressed: () => context.go(AppRoutes.clientDetail(widget.clientId)),
+          onPressed: () => handleAppRouteBack(
+            context,
+            fallbackLocation: AppRoutes.clientDetail(widget.clientId),
+          ),
           icon: const Icon(Icons.arrow_back_rounded),
           tooltip: 'Back to client profile',
         ),
@@ -323,14 +329,18 @@ class _CollectPaymentScreenState extends ConsumerState<CollectPaymentScreen> {
                                             ),
                                             _FinanceMetricChip(
                                               label: 'Paid amount',
-                                              value:
-                                                  '${_formatAmount(finance.totalPaid)} so\'m',
+                                              value: _formatAmount(
+                                                finance.totalPaid,
+                                                withUnit: true,
+                                              ),
                                               tone: _CollectTone.success,
                                             ),
                                             _FinanceMetricChip(
                                               label: 'Debt',
-                                              value:
-                                                  '${_formatAmount(finance.debt)} so\'m',
+                                              value: _formatAmount(
+                                                finance.debt,
+                                                withUnit: true,
+                                              ),
                                               tone: _CollectTone.danger,
                                             ),
                                           ],
@@ -356,8 +366,10 @@ class _CollectPaymentScreenState extends ConsumerState<CollectPaymentScreen> {
                                         const SizedBox(height: 12),
                                         _AmountLine(
                                           label: 'Remaining to collect',
-                                          value:
-                                              '${_formatAmount(finance.debt)} so\'m',
+                                          value: _formatAmount(
+                                            finance.debt,
+                                            withUnit: true,
+                                          ),
                                           tone: _CollectTone.danger,
                                         ),
                                         const SizedBox(height: 16),
@@ -477,15 +489,21 @@ class _CollectPaymentScreenState extends ConsumerState<CollectPaymentScreen> {
                                         const SizedBox(height: 16),
                                         _AmountLine(
                                           label: 'Paid now',
-                                          value:
-                                              '${_formatAmount(amounts.paidTotal)} so\'m',
+                                          value: _formatAmount(
+                                            amounts.paidTotal,
+                                            withUnit: true,
+                                          ),
                                           tone: _CollectTone.success,
                                         ),
                                         const SizedBox(height: 10),
                                         _AmountLine(
                                           label: 'Remaining after payment',
-                                          value:
-                                              '${_formatAmount(amounts.remaining < 0 ? 0 : amounts.remaining)} so\'m',
+                                          value: _formatAmount(
+                                            amounts.remaining < 0
+                                                ? 0
+                                                : amounts.remaining,
+                                            withUnit: true,
+                                          ),
                                           tone: amounts.remaining.abs() < 0.01
                                               ? _CollectTone.success
                                               : _CollectTone.danger,
@@ -718,9 +736,9 @@ class _PaymentMethodRow extends StatelessWidget {
             keyboardType: TextInputType.number,
             enabled: isActive && onChanged != null,
             textInputAction: TextInputAction.next,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Amount',
-              suffixText: 'so\'m',
+              suffixText: currentAppCurrencyCode(),
             ),
             onChanged: onChanged,
           ),
@@ -825,10 +843,6 @@ class _InlineStatus extends StatelessWidget {
   }
 }
 
-String _formatAmount(num value) {
-  if (value % 1 == 0) {
-    return value.toStringAsFixed(0);
-  }
-
-  return value.toString();
+String _formatAmount(num value, {bool withUnit = false}) {
+  return formatAppMoney(value, withUnit: withUnit);
 }

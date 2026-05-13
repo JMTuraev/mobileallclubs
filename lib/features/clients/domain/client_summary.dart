@@ -79,18 +79,19 @@ class GymClientSummary {
   }
 
   bool matchesSearch(String rawQuery) {
-    final query = rawQuery.trim().toLowerCase();
-    if (query.isEmpty) {
+    final trimmedQuery = rawQuery.trim();
+    if (trimmedQuery.isEmpty) {
       return true;
     }
 
-    final phoneDigits = (phone ?? '').replaceAll(RegExp(r'\D'), '');
-    final queryDigits = query.replaceAll(RegExp(r'\D'), '');
+    final queryDigits = trimmedQuery.replaceAll(RegExp(r'\D'), '');
+    if (queryDigits.isEmpty) {
+      return false;
+    }
 
-    return fullName.toLowerCase().contains(query) ||
-        (email ?? '').toLowerCase().contains(query) ||
-        (phone ?? '').toLowerCase().contains(query) ||
-        (queryDigits.isNotEmpty && phoneDigits.contains(queryDigits));
+    final phoneDigits = (phone ?? '').replaceAll(RegExp(r'\D'), '');
+
+    return phoneDigits.contains(queryDigits);
   }
 }
 

@@ -1,8 +1,8 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/developer_tools.dart';
 import '../../../core/services/firebase_clients.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../bootstrap/application/bootstrap_controller.dart';
@@ -204,11 +204,11 @@ class _VerifyEmailScreenState extends ConsumerState<VerifyEmailScreen> {
                             icon: const Icon(Icons.logout_rounded),
                             label: const Text('Sign out'),
                           ),
-                          if (kDebugMode) ...[
+                          if (showDeveloperDiagnosticsShortcut) ...[
                             const SizedBox(height: 12),
                             OutlinedButton.icon(
                               onPressed: () =>
-                                  context.go('/dev/firebase-diagnostics'),
+                                  openDeveloperDiagnostics(context),
                               icon: const Icon(Icons.developer_mode_rounded),
                               label: const Text(
                                 'Open Developer Firebase Diagnostics',

@@ -39,7 +39,37 @@ class BarSessionCheckSummary {
   bool get isHeld => status == 'held';
   bool get isPaid => status == 'paid';
   bool get isRefunded => status == 'refunded';
+  bool get blocksSessionEnd => isDraft || isHeld;
   String get displayStatus => status ?? 'unknown';
+}
+
+String buildSessionEndBlockedMessage(
+  String clientLabel,
+  Iterable<BarSessionCheckSummary> checks,
+) {
+  final pendingChecks = checks
+      .where((check) => check.blocksSessionEnd)
+      .toList(growable: false);
+  if (pendingChecks.isEmpty) {
+    return '';
+  }
+
+  final normalizedClientLabel = clientLabel.trim().isEmpty
+      ? 'This client'
+      : clientLabel.trim();
+  final heldCount = pendingChecks.where((check) => check.isHeld).length;
+
+  if (pendingChecks.length == 1 && heldCount == 1) {
+    return '$normalizedClientLabel uchun bar\'da yopilmagan chek bor. Avval payment qiling, keyin sessionni yoping.';
+  }
+  if (pendingChecks.length == 1) {
+    return '$normalizedClientLabel uchun bar\'da ochiq chek bor. Avval payment qiling, keyin sessionni yoping.';
+  }
+  if (heldCount == pendingChecks.length) {
+    return '$normalizedClientLabel uchun bar\'da ${pendingChecks.length} ta yopilmagan chek bor. Avval payment qiling, keyin sessionni yoping.';
+  }
+
+  return '$normalizedClientLabel uchun bar\'da ${pendingChecks.length} ta ochiq chek bor. Avval payment qiling, keyin sessionni yoping.';
 }
 
 String? _asString(dynamic value) {

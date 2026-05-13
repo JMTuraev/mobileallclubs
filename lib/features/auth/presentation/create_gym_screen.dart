@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/services/auth_bootstrap_resolver.dart';
 import '../../../core/services/firebase_clients.dart';
 import '../../../core/services/onboarding_service.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../bootstrap/application/bootstrap_controller.dart';
 
@@ -180,44 +181,63 @@ class _CreateGymScreenState extends ConsumerState<CreateGymScreen> {
     return Scaffold(
       body: AppBackdrop(
         child: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Card(
-                  child: SingleChildScrollView(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
-                      child: Form(
-                        key: _formKey,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final horizontalPadding = constraints.maxWidth >= 720
+                  ? 48.0
+                  : 24.0;
+              final contentHeight = constraints.maxHeight - 24;
+
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      horizontalPadding,
+                      12,
+                      horizontalPadding,
+                      12,
+                    ),
+                    child: Form(
+                      key: _formKey,
+                      child: SizedBox(
+                        height: contentHeight,
                         child: Column(
-                          mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'AllClubs Mobile',
-                              style: theme.textTheme.labelLarge,
+                              'All Clubs',
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.4,
+                              ),
                             ),
-                            const SizedBox(height: 10),
+                            const SizedBox(height: 6),
                             Text(
                               'Create gym',
-                              style: theme.textTheme.headlineMedium,
+                              style: theme.textTheme.headlineMedium?.copyWith(
+                                fontSize: 28,
+                              ),
                             ),
-                            const SizedBox(height: 12),
+                            const SizedBox(height: 8),
                             Text(
                               email.isEmpty
-                                  ? 'Finish onboarding by creating your gym.'
-                                  : 'Finish onboarding for $email by creating your gym.',
-                              style: theme.textTheme.bodyLarge,
+                                  ? 'Set up your gym to continue.'
+                                  : email,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodyMedium,
                             ),
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 18),
                             Row(
                               children: [
                                 Expanded(
                                   child: TextFormField(
                                     controller: _firstNameController,
                                     textInputAction: TextInputAction.next,
+                                    textCapitalization:
+                                        TextCapitalization.words,
                                     decoration: const InputDecoration(
                                       labelText: 'First name',
                                     ),
@@ -235,6 +255,8 @@ class _CreateGymScreenState extends ConsumerState<CreateGymScreen> {
                                   child: TextFormField(
                                     controller: _lastNameController,
                                     textInputAction: TextInputAction.next,
+                                    textCapitalization:
+                                        TextCapitalization.words,
                                     decoration: const InputDecoration(
                                       labelText: 'Last name',
                                     ),
@@ -277,38 +299,50 @@ class _CreateGymScreenState extends ConsumerState<CreateGymScreen> {
                               },
                             ),
                             const SizedBox(height: 12),
-                            TextFormField(
-                              controller: _clubNameController,
-                              textInputAction: TextInputAction.next,
-                              decoration: const InputDecoration(
-                                labelText: 'Gym name',
-                              ),
-                              validator: (value) {
-                                if ((value ?? '').trim().isEmpty) {
-                                  return 'Gym name is required.';
-                                }
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _clubNameController,
+                                    textInputAction: TextInputAction.next,
+                                    textCapitalization:
+                                        TextCapitalization.words,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Gym name',
+                                    ),
+                                    validator: (value) {
+                                      if ((value ?? '').trim().isEmpty) {
+                                        return 'Gym name is required.';
+                                      }
 
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 12),
-                            TextFormField(
-                              controller: _cityController,
-                              textInputAction: TextInputAction.done,
-                              onFieldSubmitted: (_) => _submit(),
-                              decoration: const InputDecoration(
-                                labelText: 'City',
-                              ),
-                              validator: (value) {
-                                if ((value ?? '').trim().isEmpty) {
-                                  return 'City is required.';
-                                }
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _cityController,
+                                    textInputAction: TextInputAction.done,
+                                    textCapitalization:
+                                        TextCapitalization.words,
+                                    onFieldSubmitted: (_) => _submit(),
+                                    decoration: const InputDecoration(
+                                      labelText: 'City',
+                                    ),
+                                    validator: (value) {
+                                      if ((value ?? '').trim().isEmpty) {
+                                        return 'City is required.';
+                                      }
 
-                                return null;
-                              },
+                                      return null;
+                                    },
+                                  ),
+                                ),
+                              ],
                             ),
                             if (_errorMessage != null) ...[
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 14),
                               Text(
                                 _errorMessage!,
                                 style: theme.textTheme.bodyMedium?.copyWith(
@@ -327,7 +361,7 @@ class _CreateGymScreenState extends ConsumerState<CreateGymScreen> {
                                 ),
                               ),
                             ],
-                            const SizedBox(height: 20),
+                            const Spacer(),
                             FilledButton(
                               onPressed: _isSubmitting ? null : _submit,
                               child: Text(
@@ -336,21 +370,14 @@ class _CreateGymScreenState extends ConsumerState<CreateGymScreen> {
                                     : 'Create gym',
                               ),
                             ),
-                            const SizedBox(height: 12),
-                            TextButton(
-                              onPressed: _isSubmitting
-                                  ? null
-                                  : () => context.go('/auth/verify-email'),
-                              child: const Text('Confirm email'),
-                            ),
                           ],
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
       ),

@@ -2,6 +2,7 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/services/firebase_clients.dart';
+import '../../../core/utils/backend_action_error.dart';
 import '../../../models/payment_amounts.dart';
 
 final subscriptionSaleServiceProvider = Provider<SubscriptionSaleService>((
@@ -190,11 +191,11 @@ class SubscriptionSaleResult {
 }
 
 String _firebaseMessage(FirebaseFunctionsException error, String fallback) {
-  return error.details?.toString() ?? error.message ?? fallback;
+  return describeBackendActionError(error, fallback: fallback);
 }
 
 String _cleanError(Object error) {
-  return error.toString().replaceFirst('Exception: ', '');
+  return describeBackendActionError(error, fallback: 'Unexpected error');
 }
 
 String? _nullIfEmpty(String? value) {

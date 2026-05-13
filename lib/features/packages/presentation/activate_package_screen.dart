@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/localization/app_currency.dart';
 import '../../../core/routing/app_router.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../models/payment_amounts.dart';
 import '../../clients/application/client_detail_providers.dart';
@@ -85,6 +87,12 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
     (true, _) => 'Edit start date',
     (_, true) => 'Replace package',
     _ => 'Activate package',
+  };
+
+  String get _subtitle => switch ((_isEditMode, _isReplaceMode)) {
+    (true, _) => 'Change only the subscription start date.',
+    (_, true) => 'Select a new package for this client.',
+    _ => 'Sell and activate a package for this client.',
   };
 
   @override
@@ -372,6 +380,7 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(appCurrencyProvider);
     final clientAsync = ref.watch(
       currentGymClientDocumentProvider(widget.clientId),
     );
@@ -404,7 +413,7 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
                 child: clientAsync.when(
                   loading: () => const _SaleLoadingCard(
                     title: 'Client',
-                    message: 'Loading client profile...',
+                    message: 'Loading client...',
                   ),
                   error: (error, stackTrace) => _SaleErrorCard(
                     title: 'Client unavailable',
@@ -422,7 +431,7 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
                     return packagesAsync.when(
                       loading: () => const _SaleLoadingCard(
                         title: 'Packages',
-                        message: 'Loading current gym packages...',
+                        message: 'Loading packages...',
                       ),
                       error: (error, stackTrace) => _SaleErrorCard(
                         title: 'Packages unavailable',
@@ -443,6 +452,8 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
 
                         return ListView(
                           children: [
+                            _SaleModeCard(title: _title, subtitle: _subtitle),
+                            const SizedBox(height: 12),
                             _ClientSaleCard(
                               clientName: resolvedName,
                               clientPhone: resolvedPhone,
@@ -469,8 +480,7 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
                               if (packages.isEmpty)
                                 const _SaleErrorCard(
                                   title: 'No packages found',
-                                  message:
-                                      'The current gym has no active package documents to sell.',
+                                  message: 'Create a package first.',
                                 )
                               else
                                 _PackagePickerCard(
@@ -487,8 +497,7 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
                             if (_isEditMode && widget.editSubscription == null)
                               const _SaleErrorCard(
                                 title: 'Subscription unavailable',
-                                message:
-                                    'Missing sold subscription context for start-date editing.',
+                                message: 'Subscription data is missing.',
                               ),
                             if (selectedPackage != null) ...[
                               const SizedBox(height: 12),
@@ -535,9 +544,7 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
                                       ),
                                 icon: const Icon(Icons.save_rounded),
                                 label: Text(
-                                  _isSubmitting
-                                      ? 'Saving changes...'
-                                      : 'Save changes',
+                                  _isSubmitting ? 'Saving...' : 'Save',
                                 ),
                               ),
                             ],
@@ -557,8 +564,8 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
                                             ? 'Replacing package...'
                                             : 'Activating package...')
                                       : (_isReplaceMode
-                                            ? 'Confirm package replacement'
-                                            : 'Confirm package sale'),
+                                            ? 'Replace package'
+                                            : 'Sell package'),
                                 ),
                               ),
                             ],
@@ -571,6 +578,44 @@ class _ActivatePackageScreenState extends ConsumerState<ActivatePackageScreen> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SaleModeCard extends StatelessWidget {
+  const _SaleModeCard({required this.title, required this.subtitle});
+
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xFF7D74FF).withValues(alpha: 0.2),
+              const Color(0xFF5149E8).withValues(alpha: 0.08),
+            ],
+          ),
+          border: Border.all(color: AppColors.border.withValues(alpha: 0.84)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: theme.textTheme.titleLarge),
+            const SizedBox(height: 6),
+            Text(subtitle, style: theme.textTheme.bodyMedium),
+          ],
         ),
       ),
     );
@@ -598,12 +643,13 @@ class _ClientSaleCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Client', style: theme.textTheme.titleLarge),
+            Text('Client', style: theme.textTheme.titleMedium),
             const SizedBox(height: 12),
             Text(clientName, style: theme.textTheme.headlineSmall),
             const SizedBox(height: 8),
             if (clientPhone != null)
               Text(clientPhone!, style: theme.textTheme.bodyLarge),
+            const SizedBox(height: 4),
             Text('ID $clientId', style: theme.textTheme.bodyMedium),
           ],
         ),
@@ -633,7 +679,7 @@ class _SaleDateCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: theme.textTheme.titleLarge),
+            Text(title, style: theme.textTheme.titleMedium),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: onPickDate,
@@ -670,7 +716,7 @@ class _PackagePickerCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Choose package', style: theme.textTheme.titleLarge),
+            Text('Packages', style: theme.textTheme.titleMedium),
             const SizedBox(height: 12),
             ...packages.map(
               (package) => Padding(
@@ -755,7 +801,7 @@ class _PackageTile extends StatelessWidget {
               Text(
                 package.price == null
                     ? '-'
-                    : '${_formatMoney(package.price!)} so\'m',
+                    : _formatMoney(package.price!, withUnit: true),
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: isDisabled
                       ? theme.colorScheme.onSurface.withValues(alpha: 0.45)
@@ -872,15 +918,15 @@ class _PaymentEditorCard extends StatelessWidget {
             const SizedBox(height: 12),
             _MetricLine(
               label: 'Package total',
-              value: '${_formatMoney(total)} so\'m',
+              value: _formatMoney(total, withUnit: true),
             ),
             _MetricLine(
               label: 'Paid',
-              value: '${_formatMoney(paymentAmounts.paidTotal)} so\'m',
+              value: _formatMoney(paymentAmounts.paidTotal, withUnit: true),
             ),
             _MetricLine(
               label: 'Remaining',
-              value: '${_formatMoney(paymentAmounts.remaining)} so\'m',
+              value: _formatMoney(paymentAmounts.remaining, withUnit: true),
               tone: paymentAmounts.remaining.abs() < 0.01
                   ? _LineTone.success
                   : _LineTone.error,
@@ -941,7 +987,7 @@ class _PaymentEditorCard extends StatelessWidget {
                 ),
                 FilledButton.tonal(
                   onPressed: isSubmitting ? null : () => onQuickAmount(total),
-                  child: const Text('Full debt'),
+                  child: const Text('Full'),
                 ),
               ],
             ),
@@ -953,7 +999,7 @@ class _PaymentEditorCard extends StatelessWidget {
               decoration: InputDecoration(
                 labelText: needsComment ? 'Comment required' : 'Comment',
                 hintText: paymentAmounts.usesDebt
-                    ? 'Explain the debt portion'
+                    ? 'Debt note'
                     : requireComment
                     ? 'Replacement reason'
                     : 'Optional note',
@@ -983,16 +1029,14 @@ class _SaleStatusCard extends StatelessWidget {
 
     return Card(
       color: isError
-          ? theme.colorScheme.errorContainer
-          : theme.colorScheme.primaryContainer,
+          ? AppColors.danger.withValues(alpha: 0.18)
+          : AppColors.success.withValues(alpha: 0.16),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Text(
           message,
           style: theme.textTheme.bodyLarge?.copyWith(
-            color: isError
-                ? theme.colorScheme.onErrorContainer
-                : theme.colorScheme.onPrimaryContainer,
+            color: isError ? AppColors.danger : AppColors.success,
           ),
         ),
       ),
@@ -1139,10 +1183,6 @@ DateTime _defaultRequestDate() {
   return DateTime(nowUtc.year, nowUtc.month, nowUtc.day);
 }
 
-String _formatMoney(num value) {
-  if (value == value.roundToDouble()) {
-    return value.toInt().toString();
-  }
-
-  return value.toStringAsFixed(2);
+String _formatMoney(num value, {bool withUnit = false}) {
+  return formatAppMoney(value, withUnit: withUnit);
 }

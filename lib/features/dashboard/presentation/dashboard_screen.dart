@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/routing/app_router.dart';
+import '../../../core/widgets/app_route_back_scope.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
 import '../../../models/auth_bootstrap_models.dart';
@@ -22,7 +22,10 @@ class DashboardScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          onPressed: () => context.go(AppRoutes.app),
+          onPressed: () => handleAppRouteBack(
+            context,
+            fallbackLocation: AppRoutes.app,
+          ),
           icon: const Icon(Icons.arrow_back_rounded),
           tooltip: 'Back to app',
         ),

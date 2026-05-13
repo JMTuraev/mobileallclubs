@@ -171,26 +171,156 @@ class GymProfile {
   const GymProfile({
     required this.gymId,
     this.name,
+    this.logoUrl,
     this.city,
     this.phone,
     this.ownerId,
+    this.billingStatus,
+    this.billingProvider,
+    this.billingPlanName,
+    this.billingPortalUrl,
+    this.billingCheckoutUrl,
+    this.billingDashboardUrl,
+    this.billingCustomerEmail,
+    this.androidSubscriptionProductIds = const <String>[],
+    this.readOnlyReason,
+    this.isReadOnly,
   });
 
   factory GymProfile.fromMap(String gymId, Map<String, dynamic> data) {
+    final nestedSources = _collectGymProfileNestedSources(data);
+
     return GymProfile(
       gymId: gymId,
       name: _asString(data['name']),
+      logoUrl: _firstNonEmptyString(
+        data['logoUrl'],
+        data['logoURL'],
+        data['logo'],
+        data['imageUrl'],
+        data['image'],
+        data['photoUrl'],
+        data['photoURL'],
+      ),
       city: _asString(data['city']),
       phone: _asString(data['phone']),
       ownerId: _asString(data['ownerId']),
+      billingStatus: _firstNonEmptyString(
+        data['billingStatus'],
+        data['subscriptionStatus'],
+        data['entitlementStatus'],
+        data['planStatus'],
+        _firstStringFromMaps(nestedSources, const [
+          'billingStatus',
+          'subscriptionStatus',
+          'entitlementStatus',
+          'planStatus',
+          'status',
+          'state',
+        ]),
+      ),
+      billingProvider: _firstNonEmptyString(
+        data['billingProvider'],
+        _firstStringFromMaps(nestedSources, const ['provider', 'providerName']),
+      ),
+      billingPlanName: _firstNonEmptyString(
+        data['billingPlanName'],
+        data['planName'],
+        _firstStringFromMaps(nestedSources, const ['planName', 'productName']),
+      ),
+      billingPortalUrl: _firstNonEmptyString(
+        data['billingPortalUrl'],
+        data['portalUrl'],
+        data['customerPortalUrl'],
+        _firstStringFromMaps(nestedSources, const [
+          'billingPortalUrl',
+          'portalUrl',
+          'customerPortalUrl',
+        ]),
+      ),
+      billingCheckoutUrl: _firstNonEmptyString(
+        data['billingCheckoutUrl'],
+        data['checkoutUrl'],
+        _firstStringFromMaps(nestedSources, const [
+          'billingCheckoutUrl',
+          'checkoutUrl',
+        ]),
+      ),
+      billingDashboardUrl: _firstNonEmptyString(
+        data['billingDashboardUrl'],
+        data['dashboardUrl'],
+        _firstStringFromMaps(nestedSources, const [
+          'billingDashboardUrl',
+          'dashboardUrl',
+        ]),
+      ),
+      billingCustomerEmail: _firstNonEmptyString(
+        data['billingCustomerEmail'],
+        data['customerEmail'],
+        _firstStringFromMaps(nestedSources, const [
+          'billingCustomerEmail',
+          'customerEmail',
+        ]),
+      ),
+      androidSubscriptionProductIds: _firstNonEmptyStringList(
+        _asStringList(data['androidSubscriptionProductIds']),
+        _asStringList(data['billingProductIds']),
+        _asStringList(data['subscriptionProductIds']),
+        _asStringList(data['playProductIds']),
+        _firstStringListFromMaps(nestedSources, const [
+          'androidSubscriptionProductIds',
+          'billingProductIds',
+          'subscriptionProductIds',
+          'playProductIds',
+          'productIds',
+        ]),
+      ),
+      readOnlyReason: _firstNonEmptyString(
+        data['readOnlyReason'],
+        data['readonlyReason'],
+        data['readOnlyMessage'],
+        data['billingMessage'],
+        data['billingReason'],
+        _firstStringFromMaps(nestedSources, const [
+          'readOnlyReason',
+          'readonlyReason',
+          'readOnlyMessage',
+          'billingMessage',
+          'billingReason',
+          'blockedReason',
+          'reason',
+          'message',
+        ]),
+      ),
+      isReadOnly:
+          _asFlexibleBool(data['isReadOnly']) ??
+          _asFlexibleBool(data['readOnly']) ??
+          _asFlexibleBool(data['readonly']) ??
+          _firstFlexibleBoolFromMaps(nestedSources, const [
+            'isReadOnly',
+            'readOnly',
+            'readonly',
+            'blocked',
+          ]),
     );
   }
 
   final String gymId;
   final String? name;
+  final String? logoUrl;
   final String? city;
   final String? phone;
   final String? ownerId;
+  final String? billingStatus;
+  final String? billingProvider;
+  final String? billingPlanName;
+  final String? billingPortalUrl;
+  final String? billingCheckoutUrl;
+  final String? billingDashboardUrl;
+  final String? billingCustomerEmail;
+  final List<String> androidSubscriptionProductIds;
+  final String? readOnlyReason;
+  final bool? isReadOnly;
 
   String get docPath => 'gyms/$gymId';
 }
@@ -225,9 +355,192 @@ String? _asString(dynamic value) {
   return null;
 }
 
+String? _firstNonEmptyString(
+  dynamic first, [
+  dynamic second,
+  dynamic third,
+  dynamic fourth,
+  dynamic fifth,
+  dynamic sixth,
+  dynamic seventh,
+]) {
+  for (final value in [first, second, third, fourth, fifth, sixth, seventh]) {
+    final resolved = _asString(value);
+    if (resolved != null) {
+      return resolved;
+    }
+  }
+
+  return null;
+}
+
+List<Map<String, dynamic>> _collectGymProfileNestedSources(
+  Map<String, dynamic> data,
+) {
+  const candidateKeys = <String>[
+    'billing',
+    'billingState',
+    'billingInfo',
+    'subscription',
+    'subscriptionInfo',
+    'plan',
+    'planInfo',
+    'contract',
+    'access',
+    'flags',
+    'readOnly',
+    'readonly',
+  ];
+
+  final sources = <Map<String, dynamic>>[];
+  final queue = <Map<String, dynamic>>[];
+
+  void addCandidate(dynamic value) {
+    final resolved = _asMap(value);
+    if (resolved == null || sources.contains(resolved)) {
+      return;
+    }
+
+    sources.add(resolved);
+    queue.add(resolved);
+  }
+
+  for (final key in candidateKeys) {
+    addCandidate(data[key]);
+  }
+
+  while (queue.isNotEmpty) {
+    final source = queue.removeAt(0);
+    for (final key in candidateKeys) {
+      addCandidate(source[key]);
+    }
+  }
+
+  return sources;
+}
+
+String? _firstStringFromMaps(
+  List<Map<String, dynamic>> sources,
+  List<String> keys,
+) {
+  for (final source in sources) {
+    for (final key in keys) {
+      final resolved = _asString(source[key]);
+      if (resolved != null) {
+        return resolved;
+      }
+    }
+  }
+
+  return null;
+}
+
+List<String> _firstNonEmptyStringList(
+  List<String>? first, [
+  List<String>? second,
+  List<String>? third,
+  List<String>? fourth,
+  List<String>? fifth,
+]) {
+  for (final values in [first, second, third, fourth, fifth]) {
+    if (values != null && values.isNotEmpty) {
+      return values;
+    }
+  }
+
+  return const <String>[];
+}
+
+List<String>? _firstStringListFromMaps(
+  List<Map<String, dynamic>> sources,
+  List<String> keys,
+) {
+  for (final source in sources) {
+    for (final key in keys) {
+      final resolved = _asStringList(source[key]);
+      if (resolved != null && resolved.isNotEmpty) {
+        return resolved;
+      }
+    }
+  }
+
+  return null;
+}
+
+bool? _firstFlexibleBoolFromMaps(
+  List<Map<String, dynamic>> sources,
+  List<String> keys,
+) {
+  for (final source in sources) {
+    for (final key in keys) {
+      final resolved = _asFlexibleBool(source[key]);
+      if (resolved != null) {
+        return resolved;
+      }
+    }
+  }
+
+  return null;
+}
+
+Map<String, dynamic>? _asMap(dynamic value) {
+  if (value is Map<String, dynamic>) {
+    return value;
+  }
+
+  if (value is Map) {
+    return value.map(
+      (key, nestedValue) => MapEntry(key.toString(), nestedValue),
+    );
+  }
+
+  return null;
+}
+
+List<String>? _asStringList(dynamic value) {
+  if (value is Iterable) {
+    final items = value
+        .map((entry) => entry.toString().trim())
+        .where((entry) => entry.isNotEmpty)
+        .toList(growable: false);
+
+    return items.isEmpty ? null : items;
+  }
+
+  if (value is String) {
+    final items = value
+        .split(',')
+        .map((entry) => entry.trim())
+        .where((entry) => entry.isNotEmpty)
+        .toList(growable: false);
+
+    return items.isEmpty ? null : items;
+  }
+
+  return null;
+}
+
 bool? _asBool(dynamic value) {
   if (value is bool) {
     return value;
+  }
+
+  return null;
+}
+
+bool? _asFlexibleBool(dynamic value) {
+  if (value is bool) {
+    return value;
+  }
+
+  if (value is String) {
+    final normalized = value.trim().toLowerCase();
+    if (normalized == 'true') {
+      return true;
+    }
+    if (normalized == 'false') {
+      return false;
+    }
   }
 
   return null;

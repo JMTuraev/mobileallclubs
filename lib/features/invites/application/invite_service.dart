@@ -1,6 +1,7 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../../core/utils/backend_action_error.dart';
 import '../domain/gym_invite_summary.dart';
 
 class SendInviteRequest {
@@ -86,10 +87,12 @@ Future<InviteActionResult> sendInvite({
     );
   } on FirebaseFunctionsException catch (error) {
     throw Exception(
-      error.details?.toString() ?? error.message ?? 'Failed to send invite',
+      describeBackendActionError(error, fallback: 'Failed to send invite'),
     );
   } catch (error) {
-    throw Exception(error.toString().replaceFirst('Exception: ', ''));
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to send invite'),
+    );
   }
 }
 
@@ -118,10 +121,12 @@ Future<InviteActionResult> cancelInvite({
     );
   } on FirebaseFunctionsException catch (error) {
     throw Exception(
-      error.details?.toString() ?? error.message ?? 'Failed to cancel invite',
+      describeBackendActionError(error, fallback: 'Failed to cancel invite'),
     );
   } catch (error) {
-    throw Exception(error.toString().replaceFirst('Exception: ', ''));
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to cancel invite'),
+    );
   }
 }
 
@@ -151,10 +156,12 @@ Future<InviteActionResult> resendInvite({
     );
   } on FirebaseFunctionsException catch (error) {
     throw Exception(
-      error.details?.toString() ?? error.message ?? 'Failed to resend invite',
+      describeBackendActionError(error, fallback: 'Failed to resend invite'),
     );
   } catch (error) {
-    throw Exception(error.toString().replaceFirst('Exception: ', ''));
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to resend invite'),
+    );
   }
 }
 
@@ -188,12 +195,18 @@ Future<List<GymInviteSummary>> getGymInvites({
         .toList(growable: false);
   } on FirebaseFunctionsException catch (error) {
     throw Exception(
-      error.details?.toString() ??
-          error.message ??
-          'Failed to load invite history',
+      describeBackendActionError(
+        error,
+        fallback: 'Failed to load invite history',
+      ),
     );
   } catch (error) {
-    throw Exception(error.toString().replaceFirst('Exception: ', ''));
+    throw Exception(
+      describeBackendActionError(
+        error,
+        fallback: 'Failed to load invite history',
+      ),
+    );
   }
 }
 
@@ -235,15 +248,18 @@ Future<InviteTokenValidationResult> validateInviteToken({
   } on FirebaseFunctionsException catch (error) {
     return InviteTokenValidationResult(
       valid: false,
-      errorMessage:
-          error.details?.toString() ??
-          error.message ??
-          'Failed to validate invite token.',
+      errorMessage: describeBackendActionError(
+        error,
+        fallback: 'Failed to validate invite token.',
+      ),
     );
   } catch (error) {
     return InviteTokenValidationResult(
       valid: false,
-      errorMessage: error.toString().replaceFirst('Exception: ', ''),
+      errorMessage: describeBackendActionError(
+        error,
+        fallback: 'Failed to validate invite token.',
+      ),
     );
   }
 }
@@ -304,10 +320,12 @@ Future<InviteActionResult> acceptInvite({
     );
   } on FirebaseFunctionsException catch (error) {
     throw Exception(
-      error.details?.toString() ?? error.message ?? 'Failed to accept invite',
+      describeBackendActionError(error, fallback: 'Failed to accept invite'),
     );
   } catch (error) {
-    throw Exception(error.toString().replaceFirst('Exception: ', ''));
+    throw Exception(
+      describeBackendActionError(error, fallback: 'Failed to accept invite'),
+    );
   }
 }
 

@@ -1,11 +1,17 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/developer_tools.dart';
 import '../../../core/routing/app_router.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/widgets/app_client_list_item.dart';
+import '../../../core/utils/phone_launcher.dart';
+import '../../../core/widgets/app_control_widgets.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
+import '../../../core/widgets/app_snackbar.dart';
 import '../../../core/widgets/liquid_glass.dart';
 import '../../../models/auth_bootstrap_models.dart';
 import '../../bootstrap/application/bootstrap_controller.dart';
@@ -18,21 +24,15 @@ import 'start_session_dialog.dart';
 
 enum _ClientsFilter { all, active, passive, online }
 
-extension on _ClientsFilter {
-  String get label {
-    return switch (this) {
-      _ClientsFilter.all => 'All Clients',
-      _ClientsFilter.active => 'Active Clients',
-      _ClientsFilter.passive => 'Passive Clients',
-      _ClientsFilter.online => 'Online Clients',
-    };
-  }
-}
-
 Color _alpha(Color color, double opacity) => color.withValues(alpha: opacity);
+const double _clientTileExtentEstimate = 94;
+const double _clientsControlsHeaderExtent = 114;
+const double _clientsFilterNavHeight = 50;
 
 class ClientsScreen extends ConsumerStatefulWidget {
-  const ClientsScreen({super.key});
+  const ClientsScreen({super.key, this.highlightClientId});
+
+  final String? highlightClientId;
 
   @override
   ConsumerState<ClientsScreen> createState() => _ClientsScreenState();
@@ -40,13 +40,168 @@ class ClientsScreen extends ConsumerStatefulWidget {
 
 class _ClientsScreenState extends ConsumerState<ClientsScreen> {
   final _searchController = TextEditingController();
+  final _listController = ScrollController();
+  final Map<String, GlobalKey> _tileKeys = <String, GlobalKey>{};
   String? _mutatingClientId;
+  String? _highlightedClientId;
+  String? _handledHighlightClientId;
   _ClientsFilter _selectedFilter = _ClientsFilter.all;
+
+  @override
+  void initState() {
+    super.initState();
+    _prepareHighlightFilters();
+  }
+
+  @override
+  void didUpdateWidget(covariant ClientsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.highlightClientId != oldWidget.highlightClientId) {
+      _prepareHighlightFilters();
+    }
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _listController.dispose();
     super.dispose();
+  }
+
+  void _prepareHighlightFilters() {
+    final targetId = widget.highlightClientId?.trim();
+    if (targetId == null || targetId.isEmpty) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+
+      final needsReset =
+          _selectedFilter != _ClientsFilter.all ||
+          _searchController.text.trim().isNotEmpty;
+
+      if (!needsReset) {
+        return;
+      }
+
+      _searchController.clear();
+      setState(() => _selectedFilter = _ClientsFilter.all);
+    });
+  }
+
+  void _scrollResultsToTop() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_listController.hasClients ||
+          _listController.offset <= 8) {
+        return;
+      }
+
+      _listController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  void _handleSearchChanged(String _) {
+    setState(() {});
+    _scrollResultsToTop();
+  }
+
+  void _clearSearch() {
+    if (_searchController.text.isEmpty) {
+      return;
+    }
+
+    _searchController.clear();
+    setState(() {});
+    _scrollResultsToTop();
+  }
+
+  void _selectFilter(_ClientsFilter filter) {
+    final nextFilter = filter == _selectedFilter ? _ClientsFilter.all : filter;
+    if (nextFilter == _selectedFilter) {
+      return;
+    }
+
+    setState(() => _selectedFilter = nextFilter);
+    _scrollResultsToTop();
+  }
+
+  void _queueHighlightedClientReveal(List<_ClientListEntry> visibleEntries) {
+    final targetId = widget.highlightClientId?.trim();
+    if (targetId == null ||
+        targetId.isEmpty ||
+        _handledHighlightClientId == targetId) {
+      return;
+    }
+
+    final targetIndex = visibleEntries.indexWhere(
+      (entry) => entry.client.id == targetId,
+    );
+    if (targetIndex == -1) {
+      return;
+    }
+
+    _handledHighlightClientId = targetId;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() => _highlightedClientId = targetId);
+
+      if (_listController.hasClients) {
+        final rawOffset = targetIndex * _clientTileExtentEstimate;
+        final maxOffset = _listController.position.maxScrollExtent;
+        final targetOffset = rawOffset.clamp(0.0, maxOffset).toDouble();
+
+        if ((_listController.offset - targetOffset).abs() > 24) {
+          await _listController.animateTo(
+            targetOffset,
+            duration: const Duration(milliseconds: 420),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      }
+
+      for (var attempt = 0; attempt < 6; attempt++) {
+        if (!mounted) {
+          return;
+        }
+
+        await Future<void>.delayed(const Duration(milliseconds: 90));
+        if (!mounted) {
+          return;
+        }
+
+        final tileContext = _tileKeys[targetId]?.currentContext;
+        if (tileContext == null || !tileContext.mounted) {
+          continue;
+        }
+
+        await Scrollable.ensureVisible(
+          tileContext,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+          alignment: 0.2,
+        );
+        break;
+      }
+
+      await Future<void>.delayed(const Duration(seconds: 3));
+      if (!mounted || _highlightedClientId != targetId) {
+        return;
+      }
+
+      setState(() => _highlightedClientId = null);
+    });
   }
 
   Future<void> _startSession(GymClientSummary client) async {
@@ -64,6 +219,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
     }
 
     setState(() => _mutatingClientId = client.id);
+    String? feedbackMessage;
 
     try {
       await ref
@@ -72,29 +228,58 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
             clientId: client.id,
             lockerNumber: dialogResult.lockerNumber,
           );
-
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${client.fullName} session started.')),
-      );
+      feedbackMessage = '${client.fullName} session started.';
     } catch (error) {
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
-        ),
-      );
+      feedbackMessage = error.toString().replaceFirst('Exception: ', '');
     } finally {
       if (mounted) {
         setState(() => _mutatingClientId = null);
+        if (feedbackMessage != null) {
+          showAppSnackBar(context, feedbackMessage);
+        }
       }
     }
+  }
+
+  Future<void> _callClientPhone(String? phone) async {
+    try {
+      final result = await confirmAndLaunchPhoneDialer(context, phone);
+      if (!mounted || result == PhoneLaunchResult.launched) {
+        return;
+      }
+
+      if (result == PhoneLaunchResult.unavailable ||
+          result == PhoneLaunchResult.invalid) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This device cannot start a phone call.'),
+          ),
+        );
+      }
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Phone call could not be started.')),
+      );
+    }
+  }
+
+  void _openPosForClient(_ClientListEntry entry) {
+    final activeSession = entry.runtimeState.activeSession;
+    if (activeSession == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('POS opens only for clients with an active session.'),
+        ),
+      );
+      return;
+    }
+
+    HapticFeedback.lightImpact();
+    context.go(AppRoutes.barPos(entry.client.id, activeSession.id));
   }
 
   @override
@@ -123,7 +308,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
 
     return AppShellBody(
       expandHeight: true,
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+      padding: appControlsPagePadding,
       child: !canAccessClients
           ? _ClientsAccessBlocked(onBack: () => context.go(AppRoutes.app))
           : clientsAsync.when(
@@ -142,88 +327,125 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                     )
                     .toList(growable: false);
 
-                final counts = _buildFilterCounts(entries);
+                final hasSearch = searchQuery.trim().isNotEmpty;
                 final matchingEntries = entries
                     .where((entry) => entry.client.matchesSearch(searchQuery))
                     .toList(growable: false);
+                final counts = _buildFilterCounts(matchingEntries);
                 final visibleEntries =
                     matchingEntries
                         .where((entry) => entry.matchesFilter(_selectedFilter))
                         .toList()
                       ..sort(_compareClientEntries);
+                _queueHighlightedClientReveal(visibleEntries);
+
+                if (visibleEntries.isEmpty) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _ClientsControlsHeader(
+                        searchController: _searchController,
+                        searchQuery: searchQuery,
+                        selectedFilter: _selectedFilter,
+                        counts: counts,
+                        onSearchChanged: _handleSearchChanged,
+                        onClearSearch: _clearSearch,
+                        onFilterSelected: _selectFilter,
+                        onCreateClient: () =>
+                            context.go(AppRoutes.createClient),
+                      ),
+                      const SizedBox(height: 10),
+                      Expanded(
+                        child: _ClientsEmptyState(
+                          hasSearch: hasSearch,
+                          filter: _selectedFilter,
+                        ),
+                      ),
+                      if (showDeveloperDiagnosticsShortcut)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 116),
+                          child: OutlinedButton.icon(
+                            onPressed: () => openDeveloperDiagnostics(context),
+                            icon: const Icon(Icons.developer_mode_rounded),
+                            label: const Text(
+                              'Open Developer Firebase Diagnostics',
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                }
 
                 return Stack(
                   children: [
                     CustomScrollView(
+                      controller: _listController,
                       slivers: [
                         SliverPersistentHeader(
                           pinned: true,
-                          delegate: _ClientsControlsHeaderDelegate(
-                            extent: 92,
+                          delegate: AppControlsSliverHeaderDelegate(
+                            extent: _clientsControlsHeaderExtent,
                             child: _ClientsControlsHeader(
                               searchController: _searchController,
                               searchQuery: searchQuery,
                               selectedFilter: _selectedFilter,
                               counts: counts,
-                              onSearchChanged: (_) => setState(() {}),
-                              onClearSearch: () {
-                                _searchController.clear();
-                                setState(() {});
-                              },
-                              onFilterSelected: (filter) {
-                                setState(() => _selectedFilter = filter);
-                              },
+                              onSearchChanged: _handleSearchChanged,
+                              onClearSearch: _clearSearch,
+                              onFilterSelected: _selectFilter,
                               onCreateClient: () =>
                                   context.go(AppRoutes.createClient),
                             ),
                           ),
                         ),
-                        if (visibleEntries.isEmpty)
-                          SliverToBoxAdapter(
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 12),
-                              child: _ClientsEmptyCard(
-                                hasSearch: searchQuery.trim().isNotEmpty,
-                                filter: _selectedFilter,
-                              ),
-                            ),
-                          )
-                        else
-                          SliverPadding(
-                            padding: const EdgeInsets.only(top: 6, bottom: 116),
-                            sliver: SliverList(
-                              delegate: SliverChildBuilderDelegate(
-                                (context, index) {
-                                  if (index.isOdd) {
-                                    return Divider(
-                                      height: 1,
-                                      thickness: 1,
-                                      color: _alpha(AppColors.border, 0.42),
-                                    );
-                                  }
+                        SliverPadding(
+                          padding: const EdgeInsets.only(top: 6, bottom: 116),
+                          sliver: SliverList(
+                            delegate: SliverChildBuilderDelegate((
+                              context,
+                              index,
+                            ) {
+                              if (index.isOdd) {
+                                return Divider(
+                                  height: 1,
+                                  thickness: 1,
+                                  color: _alpha(AppColors.border, 0.42),
+                                );
+                              }
 
-                                  final entry = visibleEntries[index ~/ 2];
+                              final entry = visibleEntries[index ~/ 2];
+                              final tileKey =
+                                  entry.client.id == widget.highlightClientId
+                                  ? (_tileKeys[entry.client.id] ??= GlobalKey())
+                                  : null;
 
-                                  return _ClientChatTile(
-                                    entry: entry,
-                                    isActionBusy:
-                                        _mutatingClientId == entry.client.id,
-                                    onTap: () => context.go(
-                                      AppRoutes.clientDetail(entry.client.id),
-                                    ),
-                                    onPrimaryAction:
-                                        entry.runtimeState.canStartSession
-                                        ? () => _startSession(entry.client)
-                                        : null,
-                                  );
-                                },
-                                childCount: visibleEntries.isEmpty
-                                    ? 0
-                                    : visibleEntries.length * 2 - 1,
-                              ),
-                            ),
+                              return _ClientChatTile(
+                                key: tileKey,
+                                entry: entry,
+                                isHighlighted:
+                                    entry.client.id == _highlightedClientId,
+                                isActionBusy:
+                                    _mutatingClientId == entry.client.id,
+                                onOpenProfile: () => context.go(
+                                  AppRoutes.clientDetail(entry.client.id),
+                                ),
+                                onPhoneTap: entry.client.phone == null
+                                    ? null
+                                    : () =>
+                                          _callClientPhone(entry.client.phone),
+                                onPrimaryAction:
+                                    entry.runtimeState.canStartSession
+                                    ? () => _startSession(entry.client)
+                                    : null,
+                                onSwipeToPos:
+                                    entry.runtimeState.activeSession != null
+                                    ? () => _openPosForClient(entry)
+                                    : null,
+                              );
+                            }, childCount: visibleEntries.length * 2 - 1),
                           ),
-                        if (kDebugMode)
+                        ),
+                        if (showDeveloperDiagnosticsShortcut)
                           SliverToBoxAdapter(
                             child: Padding(
                               padding: const EdgeInsets.only(
@@ -232,7 +454,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                               ),
                               child: OutlinedButton.icon(
                                 onPressed: () =>
-                                    context.go(AppRoutes.firebaseDiagnostics),
+                                    openDeveloperDiagnostics(context),
                                 icon: const Icon(Icons.developer_mode_rounded),
                                 label: const Text(
                                   'Open Developer Firebase Diagnostics',
@@ -286,136 +508,122 @@ class _ClientsControlsHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
             Expanded(
-              child: SizedBox(
-                height: 48,
-                child: AppLiquidGlass(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 13,
-                    vertical: 6,
-                  ),
-                  borderRadius: BorderRadius.circular(18),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xD8334255), Color(0xC0141B24)],
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.search_rounded,
-                        color: AppColors.primary,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: searchController,
-                          onChanged: onSearchChanged,
-                          style: theme.textTheme.bodyLarge,
-                          decoration: const InputDecoration(
-                            hintText: 'Search by phone',
-                            filled: false,
-                            isDense: true,
-                            contentPadding: EdgeInsets.zero,
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                          ),
-                        ),
-                      ),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 180),
-                        child: searchQuery.isEmpty
-                            ? const SizedBox(width: 18, height: 18)
-                            : IconButton(
-                                key: const ValueKey('clear-search'),
-                                onPressed: onClearSearch,
-                                icon: const Icon(Icons.close_rounded, size: 17),
-                                color: AppColors.mutedInk,
-                                splashRadius: 16,
-                              ),
-                      ),
-                    ],
-                  ),
-                ),
+              child: AppGlassSearchField(
+                controller: searchController,
+                onChanged: onSearchChanged,
+                onClear: onClearSearch,
+                clearVisible: searchQuery.isNotEmpty,
+                hintText: 'Search by phone number',
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               ),
             ),
             const SizedBox(width: 8),
-            SizedBox(
-              height: 48,
-              width: 48,
-              child: _FloatingAddClientButton(onTap: onCreateClient),
+            AppGlassIconButton(
+              icon: Icons.person_add_alt_1_rounded,
+              iconColor: Colors.white,
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppColors.primary, AppColors.accent],
+              ),
+              onTap: onCreateClient,
             ),
           ],
         ),
-        const SizedBox(height: 6),
-        SizedBox(
-          height: 30,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemBuilder: (context, index) {
-              final filter = _ClientsFilter.values[index];
-
-              return _ClientsFilterPill(
-                label: filter.label,
-                count: counts[filter] ?? 0,
-                selected: filter == selectedFilter,
-                onTap: () => onFilterSelected(filter),
-              );
-            },
-            separatorBuilder: (context, index) => const SizedBox(width: 4),
-            itemCount: _ClientsFilter.values.length,
-          ),
+        const SizedBox(height: 10),
+        _ClientsFilterNav(
+          selectedFilter: selectedFilter,
+          counts: counts,
+          onFilterSelected: onFilterSelected,
         ),
       ],
     );
   }
 }
 
-class _ClientsControlsHeaderDelegate extends SliverPersistentHeaderDelegate {
-  const _ClientsControlsHeaderDelegate({
-    required this.child,
-    required this.extent,
+class _ClientsFilterNav extends StatelessWidget {
+  const _ClientsFilterNav({
+    required this.selectedFilter,
+    required this.counts,
+    required this.onFilterSelected,
   });
 
-  final Widget child;
-  final double extent;
+  final _ClientsFilter selectedFilter;
+  final Map<_ClientsFilter, int> counts;
+  final ValueChanged<_ClientsFilter> onFilterSelected;
+
+  static const _filters = <_ClientsFilter>[
+    _ClientsFilter.all,
+    _ClientsFilter.online,
+    _ClientsFilter.active,
+    _ClientsFilter.passive,
+  ];
 
   @override
-  double get minExtent => extent;
+  Widget build(BuildContext context) {
+    final tabWidth = MediaQuery.sizeOf(context).width * 0.46;
 
-  @override
-  double get maxExtent => extent;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
     return Container(
-      color: _alpha(AppColors.canvasStrong, overlapsContent ? 0.96 : 0.84),
-      padding: const EdgeInsets.only(top: 3, bottom: 3),
-      child: child,
+      height: _clientsFilterNavHeight,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFFFFFF), Color(0xFFF6FAFF)],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _alpha(AppColors.border, 0.82)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.ink.withValues(alpha: 0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          children: [
+            for (var index = 0; index < _filters.length; index++) ...[
+              SizedBox(
+                width: tabWidth,
+                child: _ClientsFilterNavItem(
+                  label: _labelFor(_filters[index]),
+                  count: counts[_filters[index]] ?? 0,
+                  selected: _filters[index] == selectedFilter,
+                  onTap: () => onFilterSelected(_filters[index]),
+                ),
+              ),
+              if (index != _filters.length - 1) const SizedBox(width: 4),
+            ],
+          ],
+        ),
+      ),
     );
   }
 
-  @override
-  bool shouldRebuild(covariant _ClientsControlsHeaderDelegate oldDelegate) {
-    return oldDelegate.child != child || oldDelegate.extent != extent;
+  String _labelFor(_ClientsFilter filter) {
+    return switch (filter) {
+      _ClientsFilter.all => 'All',
+      _ClientsFilter.online => 'Online',
+      _ClientsFilter.active => 'Active',
+      _ClientsFilter.passive => 'Passive',
+    };
   }
 }
 
-class _ClientsFilterPill extends StatelessWidget {
-  const _ClientsFilterPill({
+class _ClientsFilterNavItem extends StatelessWidget {
+  const _ClientsFilterNavItem({
     required this.label,
     required this.count,
     required this.selected,
@@ -430,61 +638,55 @@ class _ClientsFilterPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final labelStyle = theme.textTheme.titleMedium?.copyWith(
+      fontSize: 14.5,
+      fontWeight: FontWeight.w700,
+      color: selected ? AppColors.primary : AppColors.ink,
+      letterSpacing: -0.15,
+    );
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(15),
+        borderRadius: BorderRadius.circular(16),
         child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
+          duration: const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          height: _clientsFilterNavHeight - 8,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(15),
-            gradient: selected
-                ? const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xCCF8FBFF), Color(0x80DDE5F0)],
-                  )
-                : const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [Color(0xA628394A), Color(0x88141D26)],
-                  ),
-            border: Border.all(
-              color: selected
-                  ? const Color(0x88FFFFFF)
-                  : _alpha(AppColors.border, 0.7),
-            ),
+            color: selected
+                ? AppColors.primary.withValues(alpha: 0.14)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                label,
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: selected ? AppColors.canvasStrong : AppColors.ink,
-                  fontSize: 10.4,
+              Text(label, maxLines: 1, softWrap: false, style: labelStyle),
+              const SizedBox(width: 8),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                constraints: const BoxConstraints(minWidth: 42),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 3,
                 ),
-              ),
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: selected
-                      ? _alpha(Colors.white, 0.2)
-                      : _alpha(Colors.white, 0.08),
+                      ? AppColors.primary
+                      : AppColors.panelRaised,
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
                   '$count',
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    fontSize: 9.8,
-                    color: selected
-                        ? AppColors.canvasStrong
-                        : _alpha(Colors.white, 0.92),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: selected ? Colors.white : AppColors.mutedInk,
                   ),
                 ),
               ),
@@ -498,121 +700,165 @@ class _ClientsFilterPill extends StatelessWidget {
 
 class _ClientChatTile extends StatelessWidget {
   const _ClientChatTile({
+    super.key,
     required this.entry,
-    required this.onTap,
+    required this.onOpenProfile,
     required this.onPrimaryAction,
     required this.isActionBusy,
+    required this.isHighlighted,
+    this.onPhoneTap,
+    this.onSwipeToPos,
   });
 
   final _ClientListEntry entry;
-  final VoidCallback onTap;
+  final VoidCallback onOpenProfile;
   final VoidCallback? onPrimaryAction;
   final bool isActionBusy;
+  final bool isHighlighted;
+  final VoidCallback? onPhoneTap;
+  final VoidCallback? onSwipeToPos;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final client = entry.client;
     final runtimeState = entry.runtimeState;
-    final badgeColor = _statusBadgeColor(runtimeState);
     final phoneLabel = _formatPhone(client.phone) ?? client.phone;
     final actionLabel = runtimeState.primaryActionLabel;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(2, 12, 2, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _ClientAvatar(
-                initials: client.initials,
-                imageUrl: client.imageUrl,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      client.fullName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      phoneLabel ?? 'Phone not available',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: runtimeState.isOnline
-                            ? _alpha(AppColors.ink, 0.88)
-                            : AppColors.mutedInk,
-                      ),
-                    ),
-                  ],
+    final hasTrailingBadge =
+        actionLabel != null || runtimeState.keyLabel != null;
+    final subtitle = phoneLabel != null
+        ? Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onPhoneTap,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text(
+                  phoneLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                    decoration: TextDecoration.underline,
+                    decorationColor: _alpha(AppColors.primary, 0.72),
+                  ),
                 ),
               ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (actionLabel != null || runtimeState.keyLabel != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: runtimeState.keyLabel != null
-                          ? _LockerBadge(value: runtimeState.keyLabel!)
-                          : _PrimaryActionButton(
-                              label: actionLabel!,
-                              isBusy: isActionBusy,
-                              onTap: onPrimaryAction,
-                            ),
-                    ),
-                  _ClientStatusBadge(
-                    label: _visitBadgeLabel(runtimeState),
-                    color: badgeColor,
-                  ),
-                ],
-              ),
+            ),
+          )
+        : Text(
+            'Phone not available',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: runtimeState.isOnline
+                  ? _alpha(AppColors.ink, 0.88)
+                  : AppColors.mutedInk,
+            ),
+          );
+    final trailing = hasTrailingBadge
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (runtimeState.keyLabel != null)
+                _LockerBadge(value: runtimeState.keyLabel!)
+              else
+                _PrimaryActionButton(
+                  label: actionLabel!,
+                  isBusy: isActionBusy,
+                  onTap: onPrimaryAction,
+                ),
             ],
-          ),
-        ),
+          )
+        : null;
+    final tileContent = AppClientListItem(
+      leading: AppClientPresenceAvatar(
+        label: client.fullName,
+        fallback: client.initials,
+        imageUrl: client.imageUrl,
+        isOnline: runtimeState.isOnline,
       ),
+      title: client.fullName,
+      subtitle: subtitle,
+      trailing: trailing,
+      onTap: onOpenProfile,
+      highlighted: isHighlighted,
+    );
+
+    if (onSwipeToPos == null) {
+      return tileContent;
+    }
+
+    return Dismissible(
+      key: ValueKey('client-pos-${entry.client.id}'),
+      direction: DismissDirection.startToEnd,
+      dismissThresholds: const <DismissDirection, double>{
+        DismissDirection.startToEnd: 0.28,
+      },
+      confirmDismiss: (_) async {
+        onSwipeToPos!();
+        return false;
+      },
+      background: const _ClientPosSwipeBackground(),
+      child: tileContent,
     );
   }
 }
 
-class _ClientAvatar extends StatelessWidget {
-  const _ClientAvatar({required this.initials, required this.imageUrl});
-
-  final String initials;
-  final String? imageUrl;
+class _ClientPosSwipeBackground extends StatelessWidget {
+  const _ClientPosSwipeBackground();
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return SizedBox(
-      width: 56,
-      height: 56,
-      child: CircleAvatar(
-        radius: 27,
-        backgroundColor: const Color(0xFF4B647F),
-        backgroundImage: imageUrl != null ? NetworkImage(imageUrl!) : null,
-        child: imageUrl == null
-            ? Text(
-                initials,
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: _alpha(AppColors.primary, 0.16),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _alpha(AppColors.primary, 0.38)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: _alpha(AppColors.primary, 0.18),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.point_of_sale_rounded,
+              color: AppColors.primary,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'POS Menu',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: AppColors.ink,
+                  fontWeight: FontWeight.w700,
                 ),
-              )
-            : null,
+              ),
+              Text(
+                'Swipe to open',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: AppColors.mutedInk,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -624,18 +870,22 @@ class _BadgeFrame extends StatelessWidget {
     required this.backgroundColor,
     required this.borderColor,
     this.onTap,
+    this.padding = const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+    this.constraints = const BoxConstraints(minHeight: 22, minWidth: 60),
   });
 
   final Widget child;
   final Color backgroundColor;
   final Color borderColor;
   final VoidCallback? onTap;
+  final EdgeInsetsGeometry padding;
+  final BoxConstraints constraints;
 
   @override
   Widget build(BuildContext context) {
     final content = Container(
-      constraints: const BoxConstraints(minHeight: 22, minWidth: 60),
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      constraints: constraints,
+      padding: padding,
       decoration: BoxDecoration(
         color: backgroundColor,
         borderRadius: BorderRadius.circular(999),
@@ -671,45 +921,22 @@ class _LockerBadge extends StatelessWidget {
     return _BadgeFrame(
       backgroundColor: _alpha(AppColors.accent, 0.18),
       borderColor: _alpha(AppColors.accent, 0.46),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      constraints: const BoxConstraints(minHeight: 30, minWidth: 78),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.key_rounded, size: 11.5, color: AppColors.accent),
-          const SizedBox(width: 3),
+          Icon(Icons.key_rounded, size: 15, color: AppColors.accent),
+          const SizedBox(width: 5),
           Text(
             value,
             style: theme.textTheme.labelMedium?.copyWith(
               color: AppColors.accent,
-              fontSize: 10.1,
+              fontSize: 12.5,
               fontWeight: FontWeight.w700,
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ClientStatusBadge extends StatelessWidget {
-  const _ClientStatusBadge({required this.label, required this.color});
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return _BadgeFrame(
-      backgroundColor: _alpha(color, 0.18),
-      borderColor: _alpha(color, 0.38),
-      child: Text(
-        label,
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-        ),
       ),
     );
   }
@@ -734,48 +961,15 @@ class _PrimaryActionButton extends StatelessWidget {
         onTap: isBusy ? null : onTap,
         backgroundColor: _alpha(AppColors.primary, 0.16),
         borderColor: _alpha(AppColors.primary, 0.4),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        constraints: const BoxConstraints(minHeight: 30, minWidth: 78),
         child: isBusy
             ? const SizedBox(
-                width: 12,
-                height: 12,
+                width: 14,
+                height: 14,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : Icon(Icons.key_rounded, size: 14, color: AppColors.primary),
-      ),
-    );
-  }
-}
-
-class _FloatingAddClientButton extends StatelessWidget {
-  const _FloatingAddClientButton({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppLiquidGlass(
-      padding: EdgeInsets.zero,
-      borderRadius: BorderRadius.circular(20),
-      gradient: const LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [Color(0xFFF8FBFF), Color(0xD6DEE8F1)],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(20),
-          child: const SizedBox(
-            width: 48,
-            height: 48,
-            child: Icon(
-              Icons.person_add_alt_1_rounded,
-              color: AppColors.canvasStrong,
-              size: 20,
-            ),
-          ),
-        ),
+            : Icon(Icons.lock_rounded, size: 16, color: AppColors.primary),
       ),
     );
   }
@@ -822,14 +1016,15 @@ class _ClientsErrorCard extends StatelessWidget {
   }
 }
 
-class _ClientsEmptyCard extends StatelessWidget {
-  const _ClientsEmptyCard({required this.hasSearch, required this.filter});
+class _ClientsEmptyState extends StatelessWidget {
+  const _ClientsEmptyState({required this.hasSearch, required this.filter});
 
   final bool hasSearch;
   final _ClientsFilter filter;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final title = hasSearch
         ? 'No matching clients'
         : switch (filter) {
@@ -840,19 +1035,50 @@ class _ClientsEmptyCard extends StatelessWidget {
           };
 
     final subtitle = hasSearch
-        ? 'Try another phone number or client name.'
+        ? 'Try another phone number or clear the search.'
         : switch (filter) {
             _ClientsFilter.active =>
-              'Active package holders and online members will appear here.',
+              'Active members will appear here once sessions or packages are added.',
             _ClientsFilter.passive =>
-              'Clients without an active package are shown in this tab.',
+              'Clients without an active package will appear in this section.',
             _ClientsFilter.online =>
-              'Members with an active session will appear at the top.',
+              'Members with an active session will appear here.',
             _ClientsFilter.all =>
-              'No active client documents were returned for this gym.',
+              'Add your first client to start building the gym roster.',
           };
 
-    return _StatusPanel(title: title, subtitle: subtitle);
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 320),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SvgPicture.asset(
+              'assets/illustrations/clients_empty.svg',
+              width: 220,
+              height: 180,
+            ),
+            const SizedBox(height: 18),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyLarge?.copyWith(
+                color: AppColors.mutedInk,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -1138,55 +1364,6 @@ bool _isSessionNewer(
   final currentDate =
       current.effectiveDate ?? DateTime.fromMillisecondsSinceEpoch(0);
   return candidateDate.isAfter(currentDate);
-}
-
-Color _statusBadgeColor(_ClientRuntimeState state) {
-  if (state.isOnline) {
-    return AppColors.success;
-  }
-
-  if (state.isActiveClient) {
-    return AppColors.accent;
-  }
-
-  return const Color(0xFF9AA9B8);
-}
-
-String _visitBadgeLabel(_ClientRuntimeState state) {
-  if (state.isOnline) {
-    final activeDate = state.activeSession?.effectiveDate;
-    if (activeDate == null) {
-      return 'Hozir';
-    }
-
-    return _formatElapsedSince(activeDate);
-  }
-
-  if (state.activeSubscription != null) {
-    return 'Active';
-  }
-
-  return 'Passive';
-}
-
-String _formatElapsedSince(DateTime dateTime) {
-  final difference = DateTime.now().difference(dateTime);
-  final minutes = difference.inMinutes;
-  if (minutes <= 1) {
-    return '1 min';
-  }
-
-  if (minutes < 60) {
-    return '$minutes min';
-  }
-
-  final hours = difference.inHours;
-  if (hours < 24) {
-    return '$hours soat';
-  }
-
-  final days = difference.inDays;
-  return '$days kun';
 }
 
 String? _formatPhone(String? phone) {
