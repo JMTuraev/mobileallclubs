@@ -644,7 +644,7 @@ void main() {
 
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.text('Asosiy'), findsNothing);
-    expect(find.text('Mijozlar'), findsNothing);
+    expect(find.text('Clients'), findsNothing);
     expect(find.text('Sessiyalar'), findsNothing);
     expect(find.text('Yana'), findsNothing);
   });
@@ -763,7 +763,7 @@ void main() {
     expect(find.text('Create gym'), findsWidgets);
     expect(find.text('First name'), findsOneWidget);
     expect(find.text('Gym name'), findsOneWidget);
-    expect(find.text('Confirm email'), findsOneWidget);
+    expect(find.text('new@allclubs.test'), findsOneWidget);
   });
 
   testWidgets('shows the authenticated shell when a session is restored', (
@@ -813,7 +813,7 @@ void main() {
 
       expect(find.byType(AppShellScaffold), findsOneWidget);
       expect(find.text('Search by phone number'), findsOneWidget);
-      expect(find.text('All Clients'), findsOneWidget);
+      expect(find.text('All'), findsWidgets);
       expect(find.text('Ali Valiyev'), findsOneWidget);
     },
   );
@@ -838,7 +838,7 @@ void main() {
 
     expect(find.byType(ClientsScreen), findsOneWidget);
     expect(find.text('Search by phone number'), findsOneWidget);
-    expect(find.text('All Clients'), findsOneWidget);
+    expect(find.text('All'), findsWidgets);
   });
 
   testWidgets('opens the real sessions module from the authenticated shell', (
@@ -993,13 +993,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AppShellScaffold), findsOneWidget);
-    expect(find.text('Mijozlar'), findsWidgets);
-    expect(find.text('Seanslar'), findsOneWidget);
-    expect(find.text('Moliya'), findsOneWidget);
-    expect(find.text('Paketlar'), findsOneWidget);
+    expect(find.text('Clients'), findsWidgets);
+    expect(find.text('Sessions'), findsOneWidget);
+    expect(find.text('Finance'), findsOneWidget);
+    expect(find.text('Packages'), findsOneWidget);
     expect(find.byTooltip('POS'), findsOneWidget);
-    expect(find.byTooltip('Stat'), findsOneWidget);
-    expect(find.byTooltip('Profil'), findsOneWidget);
+    expect(find.byTooltip('Stats'), findsOneWidget);
+    expect(find.byTooltip('Profile'), findsOneWidget);
 
     await tester.tap(find.byTooltip('POS'));
     await tester.pumpAndSettle();
@@ -1019,7 +1019,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Stat'));
+    await tester.tap(find.byTooltip('Stats'));
     await tester.pumpAndSettle();
     expect(find.byType(DashboardScreen), findsOneWidget);
     expect(find.text('Today gym stats'), findsOneWidget);
@@ -1030,31 +1030,31 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
 
-    await tester.tap(find.text('Mijozlar'));
+    await tester.tap(find.text('Clients'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
     expect(find.byType(ClientsScreen), findsOneWidget);
 
-    await tester.tap(find.text('Seanslar'));
+    await tester.tap(find.text('Sessions'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
     expect(find.byType(SessionsScreen), findsOneWidget);
 
-    await tester.tap(find.text('Moliya'));
+    await tester.tap(find.text('Finance'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
     expect(find.byType(FinanceScreen), findsOneWidget);
 
-    await tester.tap(find.text('Paketlar'));
+    await tester.tap(find.text('Packages'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
     expect(find.byType(PackagesScreen), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Profil'));
+    await tester.tap(find.byTooltip('Profile'));
     await tester.pumpAndSettle();
     expect(find.byType(AppShellScaffold), findsOneWidget);
     expect(find.byType(ProfileScreen), findsOneWidget);
-    expect(find.text('Mijozlar'), findsWidgets);
+    expect(find.text('Clients'), findsWidgets);
   });
 
   testWidgets('shows current gym daily stats for staff sessions', (
@@ -1115,21 +1115,21 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Mijozlar'), findsWidgets);
-    expect(find.text('Seanslar'), findsOneWidget);
-    expect(find.text('Moliya'), findsOneWidget);
-    expect(find.text('Paketlar'), findsOneWidget);
+    expect(find.text('Clients'), findsWidgets);
+    expect(find.text('Sessions'), findsOneWidget);
+    expect(find.text('Finance'), findsOneWidget);
+    expect(find.text('Packages'), findsOneWidget);
 
     tester.view.viewInsets = const FakeViewPadding(bottom: 320);
     await tester.pumpAndSettle();
 
-    expect(find.text('Mijozlar'), findsNothing);
-    expect(find.text('Seanslar'), findsNothing);
-    expect(find.text('Moliya'), findsNothing);
-    expect(find.text('Paketlar'), findsNothing);
+    expect(find.text('Clients'), findsNothing);
+    expect(find.text('Sessions'), findsNothing);
+    expect(find.text('Finance'), findsNothing);
+    expect(find.text('Packages'), findsNothing);
     expect(find.byTooltip('POS'), findsOneWidget);
-    expect(find.byTooltip('Stat'), findsOneWidget);
-    expect(find.byTooltip('Profil'), findsOneWidget);
+    expect(find.byTooltip('Stats'), findsOneWidget);
+    expect(find.byTooltip('Profile'), findsOneWidget);
   });
 
   testWidgets('renders the owner-only bar admin categories content', (
@@ -1937,7 +1937,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('Profil'));
+    await tester.tap(find.byTooltip('Profile'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();

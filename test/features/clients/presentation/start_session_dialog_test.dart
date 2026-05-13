@@ -6,6 +6,12 @@ void main() {
   testWidgets('submits the locker number from the explicit action button', (
     WidgetTester tester,
   ) async {
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    tester.view.devicePixelRatio = 1.0;
+    tester.view.physicalSize = const Size(430, 932);
+
     StartSessionDialogResult? result;
 
     await tester.pumpWidget(
@@ -31,12 +37,12 @@ void main() {
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
 
-    expect(find.widgetWithText(FilledButton, 'Give key'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'OK'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), '24');
     await tester.pump();
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Give key'));
+    await tester.tap(find.widgetWithText(FilledButton, 'OK'));
     await tester.pumpAndSettle();
 
     expect(result?.lockerNumber, '24');
@@ -76,7 +82,7 @@ void main() {
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
 
-    final buttonRect = tester.getRect(find.widgetWithText(FilledButton, 'Give key'));
+    final buttonRect = tester.getRect(find.widgetWithText(FilledButton, 'OK'));
     expect(buttonRect.bottom, lessThanOrEqualTo(612));
   });
 }
