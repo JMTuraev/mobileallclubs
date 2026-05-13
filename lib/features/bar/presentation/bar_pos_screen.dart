@@ -57,6 +57,14 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
   /// `isReadOnly` flag yet. Lets us flip into the friendly billing banner
   /// without a Firestore round-trip.
   bool _backendReportedReadOnly = false;
+
+  /// Debug-only local-cart mode. When toggled on (long-press the billing
+  /// banner in debug builds), POS mutations stay client-side: the
+  /// optimistic delta map is updated but no Cloud Function is called. Lets
+  /// owners preview the cart UX while their subscription is paused.
+  bool _demoLocalCartMode = false;
+  final Map<String, _BarProductPreview> _demoProductMeta =
+      <String, _BarProductPreview>{};
   bool _isLoadingDraft = true;
   bool _isPaying = false;
   bool _isPreparingCartAction = false;
@@ -176,14 +184,21 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
       return;
     }
 
+    final preview = _BarProductPreview(
+      productId: product.id,
+      name: product.name,
+      price: product.price ?? 0,
+    );
+
+    if (_demoLocalCartMode) {
+      _applyDemoDelta(product.id, 1, preview);
+      return;
+    }
+
     _enqueueProductMutation(
       productId: product.id,
       delta: 1,
-      preview: _BarProductPreview(
-        productId: product.id,
-        name: product.name,
-        price: product.price ?? 0,
-      ),
+      preview: preview,
     );
   }
 
@@ -196,15 +211,44 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
       return;
     }
 
+    final preview = _BarProductPreview(
+      productId: product.id,
+      name: product.name,
+      price: product.price ?? 0,
+    );
+
+    if (_demoLocalCartMode) {
+      _applyDemoDelta(product.id, -1, preview);
+      return;
+    }
+
     _enqueueProductMutation(
       productId: product.id,
       delta: -1,
-      preview: _BarProductPreview(
-        productId: product.id,
-        name: product.name,
-        price: product.price ?? 0,
-      ),
+      preview: preview,
     );
+  }
+
+  /// Local-only mutation used by [_demoLocalCartMode]. Bypasses the queue
+  /// and the backend; touches just the optimistic delta map so the grid +
+  /// floating cart pill react instantly.
+  void _applyDemoDelta(String productId, int delta, _BarProductPreview preview) {
+    final key = productId.trim();
+    if (key.isEmpty) return;
+
+    setState(() {
+      final current = _optimisticProductDeltas[key] ?? 0;
+      final next = math.max(0, current + delta);
+      if (next == 0) {
+        _optimisticProductDeltas.remove(key);
+        _optimisticProductPreviews.remove(key);
+        _demoProductMeta.remove(key);
+      } else {
+        _optimisticProductDeltas[key] = next;
+        _optimisticProductPreviews[key] = preview;
+        _demoProductMeta[key] = preview;
+      }
+    });
   }
 
   Future<void> _increaseItem(BarCheckItem item) async {
@@ -946,8 +990,8 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
     );
     final canManageCategories = resolvedSession?.role == AllClubsRole.owner;
     final gymProfile = resolvedSession?.gym;
-    final isReadOnly =
-        isGymReadOnly(gymProfile) || _backendReportedReadOnly;
+    final isReadOnly = !_demoLocalCartMode &&
+        (isGymReadOnly(gymProfile) || _backendReportedReadOnly);
     final billingNotice =
         resolveBillingNotice(gymProfile) ?? gymBillingReadOnlyMessage;
     final isOwner = resolvedSession?.role == AllClubsRole.owner;
@@ -1076,12 +1120,45 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           if (isReadOnly) ...[
-                            _BarBillingNotice(
-                              message: billingNotice,
-                              canManageBilling: isOwner,
-                              onOpenSubscription: () => context.go(
-                                '${AppRoutes.profile}?section=subscription',
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onLongPress: kDebugMode
+                                  ? () {
+                                      setState(() {
+                                        _demoLocalCartMode = true;
+                                        _backendReportedReadOnly = false;
+                                      });
+                                      ScaffoldMessenger.of(context)
+                                        ..hideCurrentSnackBar()
+                                        ..showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Demo POS mode ON — cart is '
+                                              'local-only, no backend calls.',
+                                            ),
+                                          ),
+                                        );
+                                    }
+                                  : null,
+                              child: _BarBillingNotice(
+                                message: billingNotice,
+                                canManageBilling: isOwner,
+                                onOpenSubscription: () => context.go(
+                                  '${AppRoutes.profile}?section=subscription',
+                                ),
                               ),
+                            ),
+                            const SizedBox(height: 12),
+                          ] else if (_demoLocalCartMode) ...[
+                            _BarDemoModeNotice(
+                              onExit: () {
+                                setState(() {
+                                  _demoLocalCartMode = false;
+                                  _optimisticProductDeltas.clear();
+                                  _optimisticProductPreviews.clear();
+                                  _demoProductMeta.clear();
+                                });
+                              },
                             ),
                             const SizedBox(height: 12),
                           ] else if (_statusMessage != null &&
@@ -1278,6 +1355,55 @@ class _BarBillingNotice extends StatelessWidget {
                 ],
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Tiny "Demo POS mode" indicator shown when [_demoLocalCartMode] is on.
+class _BarDemoModeNotice extends StatelessWidget {
+  const _BarDemoModeNotice({required this.onExit});
+
+  final VoidCallback onExit;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        gradient: AppGradients.primarySubtle,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppColors.primary.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.science_outlined, color: AppColors.primaryDeep, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Demo POS mode — cart is local, backend disabled.',
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: AppColors.primaryDeep,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.5,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: onExit,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.primaryDeep,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Exit'),
           ),
         ],
       ),
