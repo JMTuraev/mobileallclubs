@@ -11,6 +11,7 @@ import '../../../core/localization/app_currency.dart';
 import '../../../core/routing/app_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/backend_action_error.dart';
+import '../../../core/utils/billing_notice.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/app_control_widgets.dart';
 import '../../../core/widgets/app_filter_chip_strip.dart';
@@ -51,6 +52,11 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
   String? _activeCheckId;
   String? _statusMessage;
   bool _statusIsError = false;
+  /// Set to `true` after a backend action fails with the gym-read-only
+  /// signature, even when the gym profile itself doesn't carry the
+  /// `isReadOnly` flag yet. Lets us flip into the friendly billing banner
+  /// without a Firestore round-trip.
+  bool _backendReportedReadOnly = false;
   bool _isLoadingDraft = true;
   bool _isPaying = false;
   bool _isPreparingCartAction = false;
@@ -124,9 +130,20 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
         ? (isError ? 'Something went wrong.' : message)
         : normalizedMessage;
 
+    final looksLikeReadOnly =
+        isError && isGymBillingReadOnlyError(message);
+
     setState(() {
-      _statusMessage = resolvedMessage;
-      _statusIsError = isError;
+      if (looksLikeReadOnly) {
+        // Promote the error into the friendly billing banner instead of
+        // showing it as a generic red "Bar action failed" card.
+        _backendReportedReadOnly = true;
+        _statusMessage = null;
+        _statusIsError = false;
+      } else {
+        _statusMessage = resolvedMessage;
+        _statusIsError = isError;
+      }
     });
   }
 
@@ -928,6 +945,12 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
           checkItems.isEmpty,
     );
     final canManageCategories = resolvedSession?.role == AllClubsRole.owner;
+    final gymProfile = resolvedSession?.gym;
+    final isReadOnly =
+        isGymReadOnly(gymProfile) || _backendReportedReadOnly;
+    final billingNotice =
+        resolveBillingNotice(gymProfile) ?? gymBillingReadOnlyMessage;
+    final isOwner = resolvedSession?.role == AllClubsRole.owner;
     final appBarClientName = clientAsync.maybeWhen(
       data: (client) =>
           widget.isGuestMode ? 'Guest' : client?.fullName ?? 'Client',
@@ -1052,7 +1075,17 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (_statusMessage != null && _statusIsError) ...[
+                          if (isReadOnly) ...[
+                            _BarBillingNotice(
+                              message: billingNotice,
+                              canManageBilling: isOwner,
+                              onOpenSubscription: () => context.go(
+                                '${AppRoutes.profile}?section=subscription',
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ] else if (_statusMessage != null &&
+                              _statusIsError) ...[
                             _BarStatusCard(
                               title: 'Bar action failed',
                               message: _statusMessage!,
@@ -1068,7 +1101,7 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
                                 _selectedCategoryId = categoryId;
                               });
                             },
-                            onAddCategory: canManageCategories
+                            onAddCategory: canManageCategories && !isReadOnly
                                 ? _showCategoryComposer
                                 : null,
                             onCancelAddCategory: _hideCategoryComposer,
@@ -1083,29 +1116,31 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
                             child: _BarProductGrid(
                               products: filteredProducts,
                               quantityFor: _displayedQuantityForProduct,
-                              onAdd: _addProduct,
-                              onRemove: _decrementProduct,
+                              onAdd: isReadOnly ? null : _addProduct,
+                              onRemove: isReadOnly ? null : _decrementProduct,
+                              readOnly: isReadOnly,
                             ),
                           ),
                         ],
                       ),
                       // Floating "View cart" pill (Wolt/Glovo style).
-                      Positioned(
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        child: SafeArea(
-                          top: false,
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                            child: _BarFloatingCartPill(
-                              itemCount: cartItemCount,
-                              total: cartTotal,
-                              onTap: _openCartPanel,
+                      if (!isReadOnly)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: SafeArea(
+                            top: false,
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              child: _BarFloatingCartPill(
+                                itemCount: cartItemCount,
+                                total: cartTotal,
+                                onTap: _openCartPanel,
+                              ),
                             ),
                           ),
                         ),
-                      ),
                     ],
                   );
                 } catch (error, stackTrace) {
@@ -1124,6 +1159,127 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Banner shown at the top of POS when the gym is in read-only billing
+/// state. Replaces the generic "Bar action failed" error so users see a
+/// helpful explanation + an action they can take instead of a wall of red.
+class _BarBillingNotice extends StatelessWidget {
+  const _BarBillingNotice({
+    required this.message,
+    required this.canManageBilling,
+    required this.onOpenSubscription,
+  });
+
+  final String message;
+
+  /// Whether the current user can open the subscription page (owner only).
+  final bool canManageBilling;
+
+  final VoidCallback onOpenSubscription;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFFEF5DC), Color(0xFFFCEAB9)],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: AppColors.warning.withValues(alpha: 0.55),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.lock_clock_rounded,
+              color: AppColors.warningDeep,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'POS is paused',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.warningDeep,
+                    height: 1.15,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  message,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontSize: 12.5,
+                    color: AppColors.warningDeep.withValues(alpha: 0.85),
+                    height: 1.35,
+                  ),
+                ),
+                if (canManageBilling) ...[
+                  const SizedBox(height: 10),
+                  Material(
+                    color: AppColors.warningDeep,
+                    borderRadius: BorderRadius.circular(999),
+                    child: InkWell(
+                      onTap: onOpenSubscription,
+                      borderRadius: BorderRadius.circular(999),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Open subscription',
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12.5,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.arrow_forward_rounded,
+                              color: Colors.white,
+                              size: 14,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1512,12 +1668,14 @@ class _BarProductGrid extends StatelessWidget {
     required this.quantityFor,
     required this.onAdd,
     required this.onRemove,
+    this.readOnly = false,
   });
 
   final List<BarProductSummary> products;
   final int Function(String productId) quantityFor;
-  final ValueChanged<BarProductSummary> onAdd;
-  final ValueChanged<BarProductSummary> onRemove;
+  final ValueChanged<BarProductSummary>? onAdd;
+  final ValueChanged<BarProductSummary>? onRemove;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -1607,9 +1765,15 @@ class _BarProductGrid extends StatelessWidget {
                         return _BarProductCard(
                           product: product,
                           isOutOfStock: isOutOfStock,
+                          readOnly: readOnly,
                           quantity: quantity,
-                          onAdd: isOutOfStock ? null : () => onAdd(product),
-                          onRemove: quantity > 0 ? () => onRemove(product) : null,
+                          onAdd: (isOutOfStock || readOnly || onAdd == null)
+                              ? null
+                              : () => onAdd!(product),
+                          onRemove:
+                              (quantity > 0 && !readOnly && onRemove != null)
+                                  ? () => onRemove!(product)
+                                  : null,
                         );
                       },
                     );
@@ -1617,32 +1781,6 @@ class _BarProductGrid extends StatelessWidget {
                 ),
         ),
       ],
-    );
-  }
-}
-
-class _BarCategoryChip extends StatelessWidget {
-  const _BarCategoryChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onTap(),
-      labelStyle: theme.textTheme.labelLarge?.copyWith(
-        fontWeight: FontWeight.w600,
-      ),
     );
   }
 }
@@ -1667,6 +1805,7 @@ class _BarProductCard extends StatelessWidget {
     required this.product,
     required this.isOutOfStock,
     required this.quantity,
+    this.readOnly = false,
     this.onAdd,
     this.onRemove,
   });
@@ -1674,6 +1813,7 @@ class _BarProductCard extends StatelessWidget {
   final BarProductSummary product;
   final bool isOutOfStock;
   final int quantity;
+  final bool readOnly;
   final VoidCallback? onAdd;
   final VoidCallback? onRemove;
 
@@ -1767,16 +1907,17 @@ class _BarProductCard extends StatelessWidget {
                           ),
                         ),
                       ),
-                    Positioned(
-                      right: 8,
-                      bottom: 8,
-                      child: _QuantityControl(
-                        quantity: quantity,
-                        isOutOfStock: isOutOfStock,
-                        onAdd: onAdd,
-                        onRemove: onRemove,
+                    if (!readOnly)
+                      Positioned(
+                        right: 8,
+                        bottom: 8,
+                        child: _QuantityControl(
+                          quantity: quantity,
+                          isOutOfStock: isOutOfStock,
+                          onAdd: onAdd,
+                          onRemove: onRemove,
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
