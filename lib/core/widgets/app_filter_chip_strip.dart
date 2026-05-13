@@ -122,6 +122,7 @@ class _FilterPill extends StatelessWidget {
                 : null,
           ),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               if (item.icon != null) ...[

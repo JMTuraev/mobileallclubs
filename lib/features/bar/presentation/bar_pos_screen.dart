@@ -9,9 +9,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/localization/app_currency.dart';
 import '../../../core/routing/app_router.dart';
+import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/backend_action_error.dart';
 import '../../../core/widgets/app_backdrop.dart';
 import '../../../core/widgets/app_control_widgets.dart';
+import '../../../core/widgets/app_filter_chip_strip.dart';
 import '../../../core/widgets/app_shell_scaffold.dart';
 import '../../../core/widgets/liquid_glass.dart';
 import '../../../models/auth_bootstrap_models.dart';
@@ -160,6 +162,26 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
     _enqueueProductMutation(
       productId: product.id,
       delta: 1,
+      preview: _BarProductPreview(
+        productId: product.id,
+        name: product.name,
+        price: product.price ?? 0,
+      ),
+    );
+  }
+
+  Future<void> _decrementProduct(BarProductSummary product) async {
+    if (_isPaying) {
+      return;
+    }
+
+    if (_displayedQuantityForProduct(product.id) <= 0) {
+      return;
+    }
+
+    _enqueueProductMutation(
+      productId: product.id,
+      delta: -1,
       preview: _BarProductPreview(
         productId: product.id,
         name: product.name,
@@ -1019,40 +1041,69 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
                             )
                             .toList(growable: false);
 
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                  final cartTotal = checkItems.fold<num>(
+                    0,
+                    (sum, item) => sum + item.total,
+                  );
+
+                  return Stack(
+                    fit: StackFit.expand,
                     children: [
-                      if (_statusMessage != null && _statusIsError) ...[
-                        _BarStatusCard(
-                          title: 'Bar action failed',
-                          message: _statusMessage!,
-                          isError: _statusIsError,
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                      _BarCategoryRail(
-                        categories: categories,
-                        selectedCategoryId: selectedCategoryIdForView,
-                        onSelect: (categoryId) {
-                          setState(() {
-                            _selectedCategoryId = categoryId;
-                          });
-                        },
-                        onAddCategory: canManageCategories
-                            ? _showCategoryComposer
-                            : null,
-                        onCancelAddCategory: _hideCategoryComposer,
-                        onSaveCategory: _createCategory,
-                        isAddingCategory: _isCreatingCategory,
-                        isComposerVisible: _isCategoryComposerVisible,
-                        composerController: _newCategoryController,
-                        composerFocusNode: _newCategoryFocusNode,
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (_statusMessage != null && _statusIsError) ...[
+                            _BarStatusCard(
+                              title: 'Bar action failed',
+                              message: _statusMessage!,
+                              isError: _statusIsError,
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                          _BarCategoryRail(
+                            categories: categories,
+                            selectedCategoryId: selectedCategoryIdForView,
+                            onSelect: (categoryId) {
+                              setState(() {
+                                _selectedCategoryId = categoryId;
+                              });
+                            },
+                            onAddCategory: canManageCategories
+                                ? _showCategoryComposer
+                                : null,
+                            onCancelAddCategory: _hideCategoryComposer,
+                            onSaveCategory: _createCategory,
+                            isAddingCategory: _isCreatingCategory,
+                            isComposerVisible: _isCategoryComposerVisible,
+                            composerController: _newCategoryController,
+                            composerFocusNode: _newCategoryFocusNode,
+                          ),
+                          const SizedBox(height: 12),
+                          Expanded(
+                            child: _BarProductGrid(
+                              products: filteredProducts,
+                              quantityFor: _displayedQuantityForProduct,
+                              onAdd: _addProduct,
+                              onRemove: _decrementProduct,
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 12),
-                      Expanded(
-                        child: _BarProductGrid(
-                          products: filteredProducts,
-                          onAdd: _addProduct,
+                      // Floating "View cart" pill (Wolt/Glovo style).
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        child: SafeArea(
+                          top: false,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            child: _BarFloatingCartPill(
+                              itemCount: cartItemCount,
+                              total: cartTotal,
+                              onTap: _openCartPanel,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -1070,6 +1121,138 @@ class _BarPosScreenState extends ConsumerState<BarPosScreen> {
                   );
                 }
               },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Wolt/Glovo style floating cart pill — only visible when cart not empty.
+class _BarFloatingCartPill extends StatelessWidget {
+  const _BarFloatingCartPill({
+    required this.itemCount,
+    required this.total,
+    required this.onTap,
+  });
+
+  final int itemCount;
+  final num total;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return AnimatedSlide(
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      offset: itemCount > 0 ? Offset.zero : const Offset(0, 1.6),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 220),
+        opacity: itemCount > 0 ? 1.0 : 0.0,
+        child: Material(
+          color: AppColors.primary,
+          borderRadius: BorderRadius.circular(28),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0,
+          child: InkWell(
+            onTap: itemCount > 0 ? onTap : null,
+            child: Container(
+              height: 56,
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              decoration: BoxDecoration(
+                gradient: AppGradients.primary,
+                borderRadius: BorderRadius.circular(28),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primary.withValues(alpha: 0.32),
+                    blurRadius: 22,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '$itemCount',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          itemCount == 1 ? '1 item' : '$itemCount items',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: Colors.white.withValues(alpha: 0.86),
+                            fontWeight: FontWeight.w600,
+                            fontSize: 11.5,
+                            height: 1.0,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          formatAppMoney(total, withUnit: true),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'View cart',
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 16,
+                          color: Colors.white,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1238,18 +1421,18 @@ class _BarCategoryRail extends StatelessWidget {
             ),
           )
         else
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: categories
+          AppFilterChipStrip(
+            scrollable: true,
+            items: categories
                 .map(
-                  (category) => _BarCategoryChip(
+                  (category) => AppFilterChipStripItem(
+                    id: category.id,
                     label: category.name,
-                    selected: category.id == selectedCategoryId,
-                    onTap: () => onSelect(category.id),
                   ),
                 )
                 .toList(growable: false),
+            selectedId: selectedCategoryId ?? '',
+            onSelected: onSelect,
           ),
       ],
     );
@@ -1324,10 +1507,17 @@ class _BarCategoryComposer extends StatelessWidget {
 }
 
 class _BarProductGrid extends StatelessWidget {
-  const _BarProductGrid({required this.products, required this.onAdd});
+  const _BarProductGrid({
+    required this.products,
+    required this.quantityFor,
+    required this.onAdd,
+    required this.onRemove,
+  });
 
   final List<BarProductSummary> products;
+  final int Function(String productId) quantityFor;
   final ValueChanged<BarProductSummary> onAdd;
+  final ValueChanged<BarProductSummary> onRemove;
 
   @override
   Widget build(BuildContext context) {
@@ -1336,47 +1526,90 @@ class _BarProductGrid extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Menu', style: theme.textTheme.titleLarge),
-        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Text(
+            'Menu',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              fontSize: 17,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
         Expanded(
           child: products.isEmpty
               ? Align(
                   alignment: Alignment.topCenter,
                   child: Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.all(18),
+                    padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(8),
+                      color: AppColors.panel,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: AppColors.border.withValues(alpha: 0.5),
+                      ),
                     ),
-                    child: Text(
-                      'No active products matched the selected category.',
-                      style: theme.textTheme.bodyLarge,
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.inbox_outlined,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'No products in this category yet.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: AppColors.mutedInk,
+                              fontSize: 13.5,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 )
               : LayoutBuilder(
                   builder: (context, constraints) {
                     final width = constraints.maxWidth;
-                    final childAspectRatio = width >= 760 ? 1.02 : 0.82;
+                    final crossAxisCount = width >= 760 ? 3 : 2;
+                    // Tighter card — image area is square so total height
+                    // = (cellWidth) + ~92 (text + stepper). Use a ratio that
+                    // adapts to give roughly 1:1.32 portrait cards.
+                    final cellWidth = width / crossAxisCount;
+                    final cellHeight = cellWidth + 96;
+                    final ratio = cellWidth / cellHeight;
 
                     return GridView.builder(
-                      padding: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.only(bottom: 120),
                       itemCount: products.length,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
+                        crossAxisCount: crossAxisCount,
                         mainAxisSpacing: 12,
                         crossAxisSpacing: 12,
-                        childAspectRatio: childAspectRatio,
+                        childAspectRatio: ratio,
                       ),
                       itemBuilder: (context, index) {
                         final product = products[index];
                         final isOutOfStock = product.availableStock <= 0;
+                        final quantity = quantityFor(product.id);
 
                         return _BarProductCard(
                           product: product,
                           isOutOfStock: isOutOfStock,
-                          onTap: isOutOfStock ? null : () => onAdd(product),
+                          quantity: quantity,
+                          onAdd: isOutOfStock ? null : () => onAdd(product),
+                          onRemove: quantity > 0 ? () => onRemove(product) : null,
                         );
                       },
                     );
@@ -1414,101 +1647,342 @@ class _BarCategoryChip extends StatelessWidget {
   }
 }
 
+/// Modern food-delivery-style product tile.
+///
+/// Layout:
+///   ┌─────────────────────┐
+///   │                     │
+///   │     [image 1:1]     │   <- square top half, brand-tinted fallback
+///   │                     │
+///   │              [+]    │   <- floating add / qty stepper (bottom-right)
+///   ├─────────────────────┤
+///   │  Name (1 line)      │
+///   │  Price              │
+///   └─────────────────────┘
+///
+/// When [quantity] is 0 a single `+` FAB shows. When > 0 the same slot
+/// expands into a "- N +" stepper with primary fill.
 class _BarProductCard extends StatelessWidget {
   const _BarProductCard({
     required this.product,
     required this.isOutOfStock,
-    this.onTap,
+    required this.quantity,
+    this.onAdd,
+    this.onRemove,
   });
 
   final BarProductSummary product;
   final bool isOutOfStock;
-  final VoidCallback? onTap;
+  final int quantity;
+  final VoidCallback? onAdd;
+  final VoidCallback? onRemove;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final normalizedImage = product.image?.trim() ?? '';
+    final inCart = quantity > 0;
 
-    return Card(
+    return Material(
+      color: AppColors.panel,
+      borderRadius: BorderRadius.circular(20),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: normalizedImage.isEmpty
-                  ? DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                      ),
-                      child: Icon(
-                        Icons.local_cafe_rounded,
-                        color: theme.colorScheme.primary,
-                        size: 30,
-                      ),
-                    )
-                  : Image.network(
-                      normalizedImage,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) =>
-                          DecoratedBox(
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.surfaceContainerHighest,
-                            ),
-                            child: Icon(
-                              Icons.broken_image_rounded,
-                              color: theme.colorScheme.onSurfaceVariant,
-                              size: 30,
+        onTap: isOutOfStock ? null : onAdd,
+        splashColor: AppColors.primary.withValues(alpha: 0.06),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: inCart
+                  ? AppColors.primary.withValues(alpha: 0.55)
+                  : AppColors.border.withValues(alpha: 0.45),
+              width: inCart ? 1.5 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF1E3A5F).withValues(
+                  alpha: inCart ? 0.10 : 0.05,
+                ),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ===== Image (square) =====
+              AspectRatio(
+                aspectRatio: 1,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    _ProductImage(imageUrl: normalizedImage),
+                    if (isOutOfStock)
+                      Container(
+                        color: Colors.black.withValues(alpha: 0.32),
+                        alignment: Alignment.center,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            'Out of stock',
+                            style: theme.textTheme.labelMedium?.copyWith(
+                              color: AppColors.danger,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 11,
                             ),
                           ),
+                        ),
+                      )
+                    else if (product.availableStock <= 5)
+                      Positioned(
+                        top: 8,
+                        left: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.94),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            '${product.availableStock} left',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: AppColors.warningDeep,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 10.5,
+                            ),
+                          ),
+                        ),
+                      ),
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: _QuantityControl(
+                        quantity: quantity,
+                        isOutOfStock: isOutOfStock,
+                        onAdd: onAdd,
+                        onRemove: onRemove,
+                      ),
                     ),
+                  ],
+                ),
+              ),
+              // ===== Text =====
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      product.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14.5,
+                        height: 1.15,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      formatAppMoney(product.price ?? 0, withUnit: true),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.ink,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Image slot with deterministic gradient fallback, network image, and
+/// a "broken" state for failed URLs. Used by [_BarProductCard].
+class _ProductImage extends StatelessWidget {
+  const _ProductImage({required this.imageUrl});
+
+  final String imageUrl;
+
+  @override
+  Widget build(BuildContext context) {
+    if (imageUrl.isEmpty) {
+      return const _ProductImagePlaceholder(icon: Icons.local_cafe_rounded);
+    }
+
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return const _ProductImagePlaceholder(icon: Icons.local_cafe_rounded);
+      },
+      errorBuilder: (_, _, _) =>
+          const _ProductImagePlaceholder(icon: Icons.broken_image_outlined),
+    );
+  }
+}
+
+class _ProductImagePlaceholder extends StatelessWidget {
+  const _ProductImagePlaceholder({required this.icon});
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFEDF3FF), Color(0xFFE3ECFE)],
+        ),
+      ),
+      child: Center(
+        child: Icon(icon, size: 38, color: AppColors.primary.withValues(alpha: 0.55)),
+      ),
+    );
+  }
+}
+
+/// Floating add / quantity-stepper control overlaid on a product image.
+class _QuantityControl extends StatelessWidget {
+  const _QuantityControl({
+    required this.quantity,
+    required this.isOutOfStock,
+    this.onAdd,
+    this.onRemove,
+  });
+
+  final int quantity;
+  final bool isOutOfStock;
+  final VoidCallback? onAdd;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isOutOfStock) {
+      return const SizedBox.shrink();
+    }
+
+    if (quantity <= 0) {
+      // Single "+" FAB — primary fill, soft shadow.
+      return Material(
+        color: AppColors.primary,
+        shape: const CircleBorder(),
+        elevation: 0,
+        child: InkWell(
+          onTap: onAdd,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 38,
+            height: 38,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.4),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product.name,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    formatAppMoney(product.price ?? 0, withUnit: true),
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    isOutOfStock
-                        ? 'Out of stock'
-                        : 'Stock ${product.availableStock}',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: isOutOfStock
-                          ? theme.colorScheme.error
-                          : theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.tonal(
-                      onPressed: onTap,
-                      child: Text(isOutOfStock ? 'Unavailable' : 'Add'),
-                    ),
-                  ),
-                ],
+            child: const Icon(Icons.add_rounded, color: Colors.white, size: 22),
+          ),
+        ),
+      );
+    }
+
+    // "- N +" stepper — same height as add FAB so the slot doesn't jump.
+    final theme = Theme.of(context);
+    return Container(
+      height: 38,
+      decoration: BoxDecoration(
+        color: AppColors.primary,
+        borderRadius: BorderRadius.circular(999),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.4),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _StepperButton(
+            icon: Icons.remove_rounded,
+            onTap: onRemove,
+          ),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 180),
+            transitionBuilder: (child, animation) => FadeTransition(
+              opacity: animation,
+              child: ScaleTransition(scale: animation, child: child),
+            ),
+            child: Container(
+              key: ValueKey<int>(quantity),
+              constraints: const BoxConstraints(minWidth: 20),
+              alignment: Alignment.center,
+              child: Text(
+                '$quantity',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
               ),
             ),
-          ],
-        ),
+          ),
+          _StepperButton(
+            icon: Icons.add_rounded,
+            onTap: onAdd,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StepperButton extends StatelessWidget {
+  const _StepperButton({required this.icon, this.onTap});
+
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      customBorder: const CircleBorder(),
+      child: SizedBox(
+        width: 36,
+        height: 38,
+        child: Icon(icon, color: Colors.white, size: 20),
       ),
     );
   }
