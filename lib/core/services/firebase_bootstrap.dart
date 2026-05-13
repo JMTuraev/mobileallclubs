@@ -1,4 +1,6 @@
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -61,12 +63,14 @@ class FirebaseBootstrap {
       return _lastResult;
     }
 
-
-
     try {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
+
+      await _activateAppCheck();
+      await _wireCrashlytics();
+
       _storeResult(const FirebaseBootstrapResult.initialized());
       return _lastResult;
     } on UnsupportedError catch (error) {
@@ -84,6 +88,46 @@ class FirebaseBootstrap {
       );
       return _lastResult;
     }
+  }
+
+  static Future<void> _activateAppCheck() async {
+    try {
+      await FirebaseAppCheck.instance.activate(
+        providerAndroid: kDebugMode
+            ? const AndroidDebugProvider()
+            : const AndroidPlayIntegrityProvider(),
+        providerApple: kDebugMode
+            ? const AppleDebugProvider()
+            : const AppleDeviceCheckProvider(),
+      );
+    } on FirebaseException catch (error, stack) {
+      // App Check failure must not block startup; surface to Crashlytics later.
+      debugPrint('[FirebaseBootstrap] App Check activation failed: ${error.code}');
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stack,
+          library: 'firebase_bootstrap',
+          context: ErrorDescription('activating Firebase App Check'),
+        ),
+      );
+    }
+  }
+
+  static Future<void> _wireCrashlytics() async {
+    if (kIsWeb) return;
+    final crashlytics = FirebaseCrashlytics.instance;
+    await crashlytics.setCrashlyticsCollectionEnabled(!kDebugMode);
+
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      crashlytics.recordFlutterError(details);
+    };
+
+    PlatformDispatcher.instance.onError = (error, stack) {
+      crashlytics.recordError(error, stack, fatal: true);
+      return true;
+    };
   }
 
   static void _storeResult(FirebaseBootstrapResult result) {
